@@ -58,6 +58,7 @@ static int vi_scrolley;			/* scroll amount for ^e and ^y */
 static int vi_soset, vi_so;		/* search offset; 1 in "/kw/1" */
 static int vi_cndir = 1;		/* ^n direction */
 static int vi_status;			/* always show status */
+static int vi_joinmode = 1;		/* 1: insert extra space for pad 0: raw line join */
 static char *regs[256];			/* string registers */
 static int lnmode[256];
 
@@ -629,7 +630,7 @@ void dir_calc(char *path)
 	DIR *dps[1024];
 	DIR *dp;
 	strcpy(cur_dir, path);
-	temp_open(1, "/fm/", "/fm");
+	temp_pos(1, -1, 0, 0);
 	fspos = 0;
 	goto start;
 	while (i > 0) {
@@ -1593,12 +1594,6 @@ void vi(int init)
 				vi_mod = 2;
 				k = vi_read();
 				switch (k) {
-				case 'h':
-					ex_command(".s/\\./->/")
-					break;
-				case 'g':
-					ex_command(".s/->/\\./")
-					break;
 				case '.':
 					while (vi_arg1) {
 						term_push("j", 1);
@@ -1620,6 +1615,9 @@ void vi(int init)
 					aistr[11] = xai + '0';
 					snprintf(vi_msg, sizeof(vi_msg), "%s", aistr);
 					break;
+				case 'j':
+					vi_joinmode = !vi_joinmode;
+					break;
 				case 'o':
 					ex_command("%s/\x0d//g|%s/[ \t]+$//g")
 					vi_mod = 1;
@@ -1630,7 +1628,7 @@ void vi(int init)
 				case 'b':
 				case 'v':
 					vi_back(':');
-					term_push(k == 'v' ? "\x16" : "\x02", 1); /* ^v : ^b */
+					term_push(k == 'v' ? "\x01" : "\x02", 1); /* ^a : ^b */
 					break;
 				case ';':
 					ln = vi_prompt(":", "!", &kmap);
@@ -1739,13 +1737,13 @@ void vi(int init)
 				vi_mod = !xpac && xrow == orow ? 3 : 1;
 				ins:
 				if (vi_insmov == 127) {
+					vi_mod = vi_mod == 3 ? 2 : 1;
 					if (xrow && !(xoff > 0 && lbuf_eol(xb, xrow))) {
 						xoff = lbuf_eol(xb, --xrow);
 						vc_join(0, 2);
 					} else if (xoff)
 						vi_delete(xrow, xoff - 1, xrow, xoff, 0);
 					vi_back(xoff != lbuf_eol(xb, xrow) ? 'i' : 'a');
-					vi_mod = !xpac && xrow == orow ? 2 : 1;
 					break;
 				}
 				if (c != 'A' && c != 'C')
@@ -1753,7 +1751,7 @@ void vi(int init)
 				xoff = xoff < 0 ? 0 : xoff;
 				break;
 			case 'J':
-				vc_join(1, vi_arg1 <= 1 ? 2 : vi_arg1);
+				vc_join(vi_joinmode, vi_arg1 <= 1 ? 2 : vi_arg1);
 				break;
 			case 'K':
 				vi_splitln(xrow, xoff+1, 0);

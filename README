@@ -78,7 +78,8 @@ NEXTVI FEATURES & CHANGES
 -------------------------
 1. Added unindent keybind: ^w
 ^w may also take vi_arg1 or motions as a region.
-2. (Feature moved to patches)
+2. Added key to change the join mode of J key. keybind: vj
+Mode 1 (default) adds a space padding. Mode 0: raw line join.
 3. Added linenumbers, keybind: # (relative numbers are placed after indent)
 Passing vi_arg1 to # enables permanent line numbers.
 4. Added invisible character view, keybind: V
@@ -105,15 +106,16 @@ Setting an extra parameter in form of a number will tell how many matches with
 similar filename to skip.
 For example file might be named "./path/bla/bla/file123.c" but you can open it
 just by "ea fi" if this is a uniquely matched filename.
-12. Added ex command "fd" to set the directory for fssearch or "ea" ex command
-Running "fd" without an arg will recalculate directory info at current working dir.
+12. Added ex command "fd" to set and recalculate the directory listing for
+fssearch or "ea" ex command. No argument implies current directory.
+The "fp" command sets the path without recalculating.
 13. Added numbered buffers to vi, default 10 and ex "b" command to show buffers
 and "b%d" to switch (where %d is the buffer number). Negative buffer numbers
 switch to temp buffers.
 Added new ex command "bx", where the argument will change the number of buffers
 allowed. If the number is lower than number of buffers currently in use they
 will be deallocated. Running bx without an arg will reset to default value.
-The default value is 10 or larger depending on the number of files specified 
+The default value is 10 or larger depending on the number of files specified
 in commandline arguments.
 Increasing the number of buffers may result in a positive effect on performance of
 fssearch (8. 9.) if the search keyword does not change. This is because vi
@@ -125,8 +127,10 @@ buffer and # last swapped buffer. Now it is possible to expand any arbitrary
 buffer by using % or # (no difference in this case) followed by the buffer
 number. Example: :!echo "%69" prints the pathname for buffer 69 (if it exists).
 % and # can be escaped normally if path expansion is not wanted.
-Added new ex command "bp" which allows the user to change path pointed by current
-buffer. For example :bp vi.c|e! will repurpose the buffer for vi.c
+Added new ex command "bp" which changes the path for current buffer.
+For example :bp vi.c|e! will repurpose the buffer for vi.c
+Added new ex command "bs" which marks the current buffer as saved. Passing
+an arg will reset undo/redo history. Useful for scripting.
 14. Added key to show buffers and switch buffer
 (to switch press corresponding 0-9 number) keybind: ^7 or ^_
 If vi_arg1 is specified right before ^7 the buffer will be switched immediately
@@ -136,8 +140,8 @@ which also happens to permit numbers > 9.
 17. Added key to delete everything inside (cursor outside) "" keybind: di" or dc"
 18. Added key to delete everything inside () keybind: di) or dc)
 19. Added key to delete everything inside (cursor outside) () keybind: di( or dc(
-20. Added key to change . to -> on cursor line keybind: vh
-21. Added key to change -> to . on cursor line keybind: vg
+20.
+21.
 22. Added new ex option "ish", this makes every "!" pipe command
 run though interactive shell so that stuff like aliases work. By
 default it is enabled, can be disabled if you need to for some
@@ -268,22 +272,15 @@ this problem you may need some extra patch, see PATCHES section below.
 46. When in ex insert mode, exiting with ^c will discard changes.
 47. Added Russian keymap, and changed how xkmap_alt works, now z + vi_arg1 in
 normal mode will switch what keymap ^f key changes, so for example 1 = fa 2 =
-ru. If you need some other language kmap just make one yourself. Look into
-kmap.h it's really simple. kmap also has digraph support, that list has been
-expanded to include non printing characters. Naming resembles ASCII caret
-notation, so for example 03 is key ^c to be able to type 03 enter insert, use
-^k to go into digraph mode, type then " c" (space+c) Essentially space is
-representing typeable ctrl key.  The reason this is useful is if you are
-using @ key to make macros there has to be a way to type these control
-characters. Alternatively, it's possible to type the character literal using
-^a + ^(insertkeyhere). In neatvi this was binded to ^v, currently ^v is used
-for 48. Nextvi shall keep both, the digraph way and ^a for clarity and better
-user reference, no more searching ascii keycodes online if kmap has it in the
-clear.
-48. Improvement to change 37. Now when in prompt/insert ^v will bring up the
+ru. New language kmap can be added in kmap.h translation array.
+Added non printing characters to the list of digraphs. The naming resembles
+ASCII caret notation. For example, to type 03 (the literal for ^c) enter
+insert mode followed by digraph mode using ^k and type " c" without quotes.
+Additionally, literal can be typed using ^v as in vi(1).
+48. Improvement to change 37. Now when in prompt/insert ^a will bring up the
 latest command from history. Also the history works for searches via / or ?
 the same way. keybind vv does the same but from normal mode, to save time.
-Pressing ^v again goes to next string.
+Pressing ^a again goes to next string.
 49. Added ability to get more than 1 word for keybinds ^a ^] ^p vr vt v/
 specified by number (vi_arg1). Regex control chars will be escaped.
 vr vt v/ ^] ^p will grab word(s) only if vi_arg1 >= 1 otherwise the keybind
@@ -406,13 +403,33 @@ this is an example text for subs and has preintafter or void
 :%s/(int)\|(void)/pre\2after/g
 this is an example text for subs and has prepreafterafter or prevoidafter
 
+- ex ranges:
+Some ex commands can be prefixed with ranges.
+Example: print lines 1,5
+:1,5p
+Example: print 5 lines around xrow
+:.-5,.+5p
+Example: print until int is found
+:.,/int/p
+Example: print until int is found in reverse
+:?int?,.p
+Note: in some cases . can be dropped but is kept for readability.
+
 - ex global command:
-same syntax as ex substitution command, but instead of replacement
+Same syntax as ex substitution command, but instead of replacement
 string it takes an ex command after the / / enclosed regex.
 Example: remove empty lines
 :g/^$/d
 Try doing similar with substitution command - will not work as removing '\n'
 without deleting the line is invalid, but it will work with global command.
+Multiple ex commands can be chained in one global command.
+In this case the ex separator has to be escaped once.
+Example: yank matches and print them out.
+:g/int/ya A\|p
+If you wanted to get really fancy, it is possible to nest global commands
+inside of global commands.
+Example: find all lines with int and a semicolon and append "has a semicolon"
+:g/int/:.g/;/tp A has a semicolon
 
 - search motions:
 ? and / searches have the ability to be used as motions. This seems very
@@ -449,7 +466,7 @@ Congratulations, vi has unofficially replaced your shell's frontend.
 Example 3:
 Setup some custom @@ macros in your favorite registers.
 export EXINIT="e|tp io{
-}kA|tp 1G|tp 2\"ayy"
+}kA|tp 1G|tp 2\"ayy"
 This macro gets loaded into register a, when @a is executed the macro will
 create { and closing } below the cursor leaving cursor in insert mode in
 between the braces. This is something you would commonly do in C like
@@ -520,8 +537,7 @@ term_push(), but it's not required. Because they are macros they may run
 suboptimally or not handle every possible edge case. When calling a macro
 feature from another macro, the results are pushed back, which means the
 macro feature will always execute last, with the exception of feature 69.
-These features are considered a macro: 5. 6. 16. 17. 18. 19. 20.
-21. 26. 27. 34. 65. 71.
+These features are considered a macro: 5. 6. 16. 17. 18. 19. 26. 27. 34. 65. 71.
 
 Q3: Keybind with CTRL does not work?
 A3: vi is reading ASCII codes sent by the terminal. Depending on the
