@@ -2,15 +2,15 @@
 #include "kmap.h"
 
 /* access mode of new files */
-#define MKFILE_MODE		0600
+int conf_mode = 0600;
 
 struct filetype fts[] = {
 	{"c", "\\.(c|h|cpp|hpp|cc|cs)$"},		/* C */
 	{"roff", "\\.(ms|tr|roff|tmac|txt|[1-9])$"},	/* troff */
 	{"tex", "\\.tex$"},				/* tex */
 	{"msg", "letter$|mbox$|mail$"},			/* email */
-	{"mk", "Makefile$|makefile$|\\.mk$"},		/* makefile */
-	{"sh", "\\.(sh|bash|zsh)$"},			/* shell script */
+	{"mk", "[Mm]akefile$|\\.mk$"},			/* makefile */
+	{"sh", "\\.(ba|z)?sh$|(ba|z|k)shrc$|profile$"},	/* shell script */
 	{"py", "\\.py$"},				/* python */
 	{"nm", "\\.nm$"},				/* neatmail */
 	{"js", "\\.js$"},				/* javascript */
@@ -44,14 +44,13 @@ struct highlight hls[] = {
 	/* lbuf lines are *always "\n\0" terminated, for $ to work one needs to account for '\n' too */
 	/* "/" is default hl, must have at least 1 entry for fallback */
 	{"/", NULL, {14 | SYN_BD}, {1}, 0, 2},  /* <-- optional, used by hll if set */
-	/* optional, used by hlp if set */
-	{"/", NULL, {0, 9 | SYN_BGMK(10), 9 | SYN_BGMK(10)}, {1, -1, -1}, 0, 3},
+	{"/", NULL, {9 | SYN_BGMK(10)}, {0}, 0, 3}, /* <-- optional, used by hlp if set */
 	{"/", NULL, {9}, {0}, 0, 1}, /* <-- optional, used by hlw if set */
 
 	{"c", NULL, {14 | SYN_BD}, {1}, 0, 2},
 	{"c", "^.+\\\\\n$", {14}, {1}},
 	{"c", "(/\\*[!*/]*)|([^\"!/*]*\\*/)", {4 | SYN_IT}, {0}, 2},
-	{"c", NULL, {0, 9 | SYN_BGMK(12), 9 | SYN_BGMK(12)}, {1, -1, -1}, 0, 3},
+	{"c", NULL, {9 | SYN_BGMK(12)}, {0}, 0, 3},
 	{"c", NULL, {9}, {0}, 0, 1},
 	{"c", "\\<(?:signed|unsigned|char|short|u?int(?:64_t|32_t|16_t|8_t)?|\
 long|f(?:loat|64|32)|double|void|enum|union|typedef|static|extern|register|struct|\
@@ -60,16 +59,16 @@ s(?:64|32|16|8)|u(?:64|32|16|8)|b32|bool|const|size_t|inline|restrict|\
 out|err)|errno)|(return|for|while|if|else|do|sizeof|goto|switch|case|\
 default|break|continue))\\>", {10, 12 | SYN_BD, 11}},
 	{"c", "(\\?).+?(:)", {0, 3, 3}, {1, 0, -1}},
-	{"c", "//.*", {4 | SYN_IT}},
+	{"c", "(?://.*)|^(?:\t* \\*.*)", {4 | SYN_IT}},
 	{"c", "#[ \t]*([a-zA-Z0-9_]+([ \t]*<.*>)?)", {6, 6, 5}},
 	{"c", "([a-zA-Z0-9_]+)\\(", {0, SYN_BD}},
 	{"c", "\"\"|\"(?:.*?(?:\\\\\\\\|[^\\\\])\")?", {5}},
 	{"c", "'(?:[^\\\\]|\\\\.|\\\\x[0-9a-fA-F]{1,2}|\\\\[0-9]+?)'", {5}},
-	{"c", "[-+]?\\<(?:0[xX][0-9a-fA-FUL]+|[0-9.]+[0-9eEfFuULl]+|[0-9]+)\\>", {9}},
+	{"c", "[-+.]?\\<(?:0[xX][0-9a-fA-FUL]+|[0-9]+\\.?[0-9eEfFuULl]+|[0-9]+)\\>", {9}},
 
 	{"roff", NULL, {14 | SYN_BD}, {1}, 0, 2},
 	{"roff", NULL, {9}, {0}, 0, 1},
-	{"roff", "^[.'][ \t]*((SH.*)|(de) (.*)|([^ \t\\\\]{2,}))?.*",
+	{"roff", "^[.'][ \t]*(([sS][hH].*)|(de) (.*)|([^ \t\\\\]{2,}))?.*",
 		{4, 0, 5 | SYN_BD, 4 | SYN_BD, 5 | SYN_BD, 4 | SYN_BD}, {1}},
 	{"roff", "\\\\\".*", {2 | SYN_IT}},
 	{"roff", "\\\\{1,2}[*$fgkmns]([^[\\(]|\\(..|\\[[^\\]]*\\])", {3}},
@@ -98,7 +97,7 @@ default|break|continue))\\>", {10, 12 | SYN_BD, 11}},
 	{"mk", NULL, {14 | SYN_BD}, {1}, 0, 2},
 	{"mk", NULL, {9}, {0}, 0, 1},
 	{"mk", "([A-Za-z0-9_]*)[ \t]*:?=", {0, 3}},
-	{"mk", "\\$\\([a-zA-Z0-9_]+\\)", {3}},
+	{"mk", "\\$[\\({][a-zA-Z0-9_]+[\\)}]|\\$\\$", {3}},
 	{"mk", "#.*", {2 | SYN_IT}},
 	{"mk", "([A-Za-z_%.\\-]+):", {0, SYN_BD}},
 
@@ -107,7 +106,7 @@ default|break|continue))\\>", {10, 12 | SYN_BD, 11}},
 	{"sh", NULL, {9}, {0}, 0, 1},
 	{"sh", "\\<(?:break|case|continue|do|done|elif|else|esac|fi|for|if|in|then|until|while)\\>",
 		{5 | SYN_BD}},
-	{"sh", "#.*$", {2 | SYN_IT}},
+	{"sh", "[ \t](#.*)|^(#.*)", {0, 2 | SYN_IT, 2 | SYN_IT}},
 	{"sh", "\"(?:[^\"\\\\]|\\\\.)*\"", {4}},
 	{"sh", "`(?:[^`\\\\]|\\\\.)*`", {4}},
 	{"sh", "'[^']*'", {4}},
@@ -208,6 +207,7 @@ strike|tt|xmp|doctype|h1|h2|h3|h4|h5|h6|\
 	{"html", "&[a-zA-Z0-9_]+;", {5}},
 
 	/* diff */
+	{"diff", NULL, {14 | SYN_BD}, {1}, 0, 2},
 	{"diff", "^-.*", {1}},
 	{"diff", "^\\+.*", {2}},
 	{"diff", "^@.*", {6}},
@@ -217,14 +217,17 @@ strike|tt|xmp|doctype|h1|h2|h3|h4|h5|h6|\
 	{"/fm", "^\\.+(?:(?:(/)\\.\\.+)+)?", {4, 6}},
 	{"/fm", "[^/]*\\.sh\n$", {2}},
 	{"/fm", "[^/]*(?:\\.c|\\.h|\\.cpp|\\.cc)\n$", {5}},
-	{"/fm", "/.+/([^/]+\n$)?", {6, 8}, {1, 1}},
-	{"/fm", "(/).+[^/]+\n$", {8, 6}, {1, 1}},
+	{"/fm", "/.*/([^/]+\n$)?", {6, 8}, {1, 1}},
+	{"/fm", "(/).*[^/]+\n$", {8, 6}, {1, 1}},
 
 	/* numbers highlight for ^v */
-	{"/#", "[ewEW]", {14 | SYN_BD}},
+	{"/#", "[0lewEW]", {14 | SYN_BD}},
 	{"/#", "1([ \t]*[1-9][ \t]*)9", {9, 13 | SYN_BD}},
 	{"/#", "9[ \t]*([1-9][ \t]*)1", {9, 13 | SYN_BD}},
 	{"/#", "[1-9]", {9}},
+
+	/* numbers highlight for # */
+	{"/##", "[0-9]+", {9 | SYN_BD}},
 
 	/* autocomplete dropdown */
 	{"/ac", "[^ \t-/:-@[-^{-~]+(?:(\n$)|\n)|\n|([^\n]+(\n))",
@@ -233,6 +236,8 @@ strike|tt|xmp|doctype|h1|h2|h3|h4|h5|h6|\
 
 	/* status bar (is never '\n' terminated) */
 	{"/-", "^(\".*\").*(\\[[wrf]\\]).*$", {8 | SYN_BD, 4, 1}},
+	{"/-", "^<(.+)> [^ ]+ ([0-9]+L) ([0-9]+W) (S[0-9]+) (O[0-9]+) (C[0-9]+)$",
+		{8 | SYN_BD, 9, 4, 3, 5, 14, 11}},
 	{"/-", "^(\".*\").* ([0-9]{1,3}%) (L[0-9]+) (C[0-9]+) (B-?[0-9]+)?.*$",
 		{8 | SYN_BD, 4, 9, 4, 11, 2}},
 	{"/-", "^.*$", {8 | SYN_BD}},
@@ -240,12 +245,12 @@ strike|tt|xmp|doctype|h1|h2|h3|h4|h5|h6|\
 int hlslen = LEN(hls);
 
 /* how to highlight text in the reverse direction */
-#define SYN_REVDIR		SYN_BGMK(8)
+int conf_hlrev = SYN_BGMK(8);
 
 /* right-to-left characters (used only in dctxs[] and dmarks[]) */
 #define CR2L		"ءآأؤإئابةتثجحخدذرزسشصضطظعغـفقكلمنهوىييپچژکگی‌‍؛،»«؟ًٌٍَُِّْٔ"
 /* neutral characters (used only in dctxs[] and dmarks[]) */
-#define CNEUT		"-\\!\"#$%&'\\()*+,./:;<\\=>?@^_`{|}~ "
+#define CNEUT		"-\\!\"#$%&'\\()*+,./:;<\\=>?@\\^_`{|}~ "
 
 struct dircontext dctxs[] = {
 	{-1, "^[" CR2L "]"},
@@ -254,30 +259,17 @@ struct dircontext dctxs[] = {
 int dctxlen = LEN(dctxs);
 
 struct dirmark dmarks[] = {
-	{+0, +1, 1, "\\\\\\*\\[([^\\]]+)\\]"},
-	{+1, -1, 0, "[" CR2L "][" CNEUT CR2L "]*[" CR2L "]"},
-	{-1, +1, 0, "[a-zA-Z0-9_][^" CR2L "\\\\`$']*[a-zA-Z0-9_]"},
-	{+0, +1, 0, "\\$([^$]+)\\$"},
-	{+0, +1, 1, "\\\\[a-zA-Z0-9_]+\\{([^}]+)\\}"},
-	{-1, +1, 0, "\\\\[^ \t" CR2L "]+"},
+	{+1, {-1}, "[" CR2L "][" CNEUT CR2L "]*[" CR2L "]"},
+	{-1, {0, 1, -1, 1, -1}, "(^[ \t]*)([^" CR2L "]*)([" CR2L "]*)([^" CR2L "]*)"},
 };
 int dmarkslen = LEN(dmarks);
 
-struct placeholder placeholders[] = {
-	{0x200c, "-", 1}, /* ‌ */
-	{0x200d, "-", 1}, /* ‍ */
+struct placeholder _ph[2] = {
+	{{0x0,0x1f}, "^", 1, 1},
+	{{0x200c,0x200d}, "-", 1, 3},
 };
-int placeholderslen = LEN(placeholders);
-
-int conf_hlrev(void)
-{
-	return SYN_REVDIR;
-}
-
-int conf_mode(void)
-{
-	return MKFILE_MODE;
-}
+struct placeholder *ph = _ph;
+int phlen = LEN(_ph);
 
 char **conf_kmap(int id)
 {

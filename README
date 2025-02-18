@@ -1,724 +1,1006 @@
-NEXTVI
-======
-Nextvi is a vi/ex editor. It can edit bidirectional UTF-8 text.
-
-NOTICE
-======
-As of 2022-01-01 Nextvi development has been driven to completion.
-No new features are being added, old ones polish and improve.
-Be sure to read Q1 in the FAQ section of this file before doing anything else.
+Nextvi(1)                   General Commands Manual                  Nextvi(1)
 
 NAME
-======
-Nextvi tends to favor clean implementations over 100% adhering to POSIX like
-neatvi does. Thus the name "next", to signify that we are thinking outside
-the box. The notable changes that I am referring to (see below): 56, 60, 61.
-Some keybinds specified by POSIX were not implemented in original neatvi,
-nextvi might use them for some features below.
+     Nextvi - A small vi/ex terminal text editor
 
-NEATVI FEATURES
----------------
-- ex options:
-can be set using :se option or :se option=value
-can be unset using :se nooption
-td
-  Current direction context.  The following values are meaningful:
-  * +2: always left-to-right.
-  * +1: follow conf.c's dircontexts[]; left-to-right for others.
-  * -1: follow conf.c's dircontexts[]; right-to-left for others.
-  * -2: always right-to-left.
-shape
-  If set (default), performs Arabic/Farsi letter shaping.
-order
-  If set, reorder characters based on the rules defined
-  in conf.c.
-hl
-  If set (default), text will be highlighted based on syntax
-  highlighting rules in conf.c.
-hll
-  If set, highlight current line.
-ai
-  As in vi(1).
-ic
-  As in vi(1).
+SYNOPSIS
+     vi [-emsv] [file ...]
 
-- special marks:
-* the position of the previous change
-[ the first line of the previous change
-] the last line of the previous change
+DESCRIPTION
+     Nextvi is a modern clone of the command-line text editor vi(1),
+     initially developed by Bill Joy in 1976 for Unix-based systems.
+     Nextvi builds upon many standard features from vi(1) including
+     unique modal interface that allows users to switch between normal,
+     insert, and command modes, for efficient text manipulation.
+     Additional enhancements include an unrestricted macro system,
+     syntax highlighting, keymaps, bidirectional UTF-8 support, and
+     numerous other features. Nextvi remains highly efficient, portable,
+     and hackable, ensuring its continued relevance and high quality
+     for years to come.
 
-- special yank buffers:
-/ the previous search keyword
-: the previous ex command
+OPTIONS
+     -e      Enter Ex mode on startup
+     -m      Disable initial file read message
+     -s      Enter raw Ex mode on startup
+     -v      Enter visual mode on startup (Default)
 
-- ex commands:
-:cm[!] [kmap]
-Without kmap, prints the current keymap name. When kmap is specified, sets
-the alternate keymap to kmap and, unless ! is given, switches to this keymap.
-:ft [filetype]
-Without filetype, prints the current file type. When filetype is specified,
-sets the file type of the current ex buffer.
-In nextvi :ft also reloads the highlight ft, which makes it possible to reset
-dynamic highlights created by options like "hlw".
+MANPAGE NOTATION
+     <x>     A closure where x represents character literal
+     [x]     A closure where x represents optional argument
+     {x}     A closure where x represents required argument
+     "x"     A closure where x represents a string
+     <^X>    Represents a ctrl key X
+     #       Represents a positive number in a closure
+     *       Represents any character(s) in a closure
+     < >     Separates alternatives in a closure
+     x-y     Range from x to y
 
-- new key mappings (normal):
-^a searches for the word under the cursor.
-zL, zl, zr, and zR change the value of td option.
-ze and zf switch to the English and alternate keymap.
-gu, gU, and g~ switch character case.
-^l updates terminal dimensions and redraws the screen.
+VI NORMAL
+     [#]j          Move # lines down
+     [#]k          Move # lines up
+     [#]+
+     [#]<^M>
+     [#]<Newline>
+                   Move # lines down, cursor after indent
+     [#]-          Move # lines up, cursor after indent
+     [#]h          Move # cols left
+     [#]l          Move # cols right
+     f{arg}        Move to arg character found forward
+     F{arg}        Move to arg character found backward
+     t{arg}        Move until arg character found forward
+     T{arg}        Move until arg character found backward
+     [#],          Repeat last <f F t T> move backward # times
+     [#];          Repeat last <f F t T> move forward # times
+     [#]E          Move to end of word # times, skip punctuation
+     [#]e          Move to end of word # times
+     [#]B          Move to start of word backward # times, skip punctuation
+     [#]b          Move to start of word backward # times
+     [#]W          Move to start of word forward # times, skip punctuation
+     [#]w          Move to start of word forward # times
+     vw            Toggle line mode for <E e B b W w>
+     [#]{          Move to next <{> section down # times
+     [#]}          Move to next <{> section up # times
+     [#][          Move to next <Newline> section down # times
+     [#]]          Move to next <Newline> section up # times
+     ^             Move to start of line after indent
+     0             Move to start of line
+     $             Move to end of line
+     [#]|          Goto # col
+     [#]<Space>    Move # characters forward
+     [#]<^H>
+     [#]<Backspace>
+                   Move # characters backward
+     %             Move to closest <] ) }><[ ( {> pair
+     {#}%          Move to # percent line number
+     '{arg}        Move to a line mark arg
+     `{arg}        Move to a line mark arg with cursor position
+     gg            Goto first line in buffer
+     [#]G          Move to last line in buffer or # line
+     H             Move to highest line on a screen
+     L             Move to lowest line on a screen
+     M             Move to middle line on a screen
+     [#]z.         Center screen at cursor. # is xtop
+     [#]z<^M>
+     [#]z<Newline>
+                   Center screen at top row. # is xtop
+     [#]z-         Center screen at bottom row. # is xtop
+     [#]<^E>       Scroll down 1 or # lines, retain # and cursor position
+     [#]<^Y>       Scroll up 1 or # lines, retain # and cursor position
+     [#]<^D>       Scroll down half a screen size. If [#], set scroll to #
+                   lines
+     [#]<^U>       Scroll up half a screen size. If [#], set scroll to # lines
+     <^B>          Scroll up full screen size
+     <^F>          Scroll down full screen size
+     #             Show global and relative line numbers
+     2#            Toggle show global line numbers permanently
+     4#            Toggle show relative line numbers after indent permanently
+     8#            Toggle show relative line numbers permanently
+     V             Toggle show hidden characters:<Space Tab Newline>
+     <^C>          Toggle show line motion numbers for <l h e b E B w W>
+     {1-5}<^C>     Switch to line motion number mode #
+     <^V>          Loop through line motion number modes
+     [#]<^R>       Redo # times
+     [#]u          Undo # times
+     <^I>
+     <Tab>
+                   Open file path from cursor to end of line
+     <^K>          Write current buffer to file. Force write on 2nd attempt
+     [#]<^W>{arg}  Unindent arg region # times
+     [#]<{arg}     Indent left arg region # times
+     [#]>{arg}     Indent right arg region # times
+     "{arg}{arg1}  Operate on arg register according to arg1 motion
+     R             Print registers and their contents
+     [#]&{arg}     Execute arg register macro in non-blocking mode # times
+     [#]@{arg}     Execute arg register macro in blocking mode # times
+     [#]@@
+     [#]&&
+                   Execute a last executed register macro # times
+     [#].          Repeat last normal command # times
+     [#]v.         Repeat last normal command moving down across # lines
+     :             Enter ex prompt
+     [#]!{arg}     Enter pipe ex prompt based on region # or arg
+     vv            Enter ex prompt with the last line from history buffer b-1
+     [#]vr         Enter %s/ ex prompt. Insert # words from cursor
+     [#]vt[#arg]   Enter .,.+0s/ ex prompt. Insert # of lines from cursor.
+                   Insert #arg words from cursor
+     [#]v/         Enter v/ xkwd ex prompt to set search keyword. Insert #
+                   words from cursor
+     v;            Enter ! ex prompt
+     [#]vi         Enter %s/ ex prompt. Contains regex for changing spaces to
+                   tabs. # modifies tab width
+     [#]vI         Enter %s/ ex prompt. Contains regex for changing tabs to
+                   spaces. # modifies tab width
+     vo            Remove trailing white spaces and <\r> line endings
+     va            Toggle ai ex option
+     <^G>          Print buffer status infos
+     1<^G>         Enable permanent status bar row
+     2<^G>         Disable permanent status bar row
+     ga            Print character info
+     1ga           Enable permanent character info bar row
+     2ga           Disable permanent character info bar row
+     [#]gw         Hard line wrap a line to # col limit. Default: 80
+     [#]gq         Hard line wrap a buffer to # col limit. Default: 80
+     [#]g~{arg}    Switch character case for arg region # times
+     [#]gu{arg}    Switch arg region to lowercase # times
+     [#]gU{arg}    Switch arg region to uppercase # times
+     [#]~          Switch character case # times forward
+     i             Enter insert mode
+     I             Enter insert mode at start of line after indent
+     A             Enter insert mode at end of line
+     a             Enter insert mode 1 character forward
+     [#]s          Enter insert mode and delete # characters
+     S             Enter insert mode and delete all characters
+     o             Enter insert mode and create a new line down
+     O             Enter insert mode and create a new line up
+     [#]c{arg}     Enter insert mode and delete arg region # times
+     C             Enter insert mode and delete from cursor to end of line
+     [#]d{arg}     Delete arg region # times
+     D             Delete from cursor to end of line
+     [#]x          Delete # characters from cursor forward
+     [#]X          Delete # characters from cursor backward
+     di{arg}       Delete inside arg pairs <( ) ">
+     ci{arg}       Change inside arg pairs <( ) ">
+     [#]r{arg}     Replace # characters with arg from cursor forward
+     K             Split a line
+     {#}K          Split a line without creating blank <Newline>
+     [#]J          Join # lines
+     vj            Toggle space padding when joining lines
+     [#]y{arg}     Yank arg region # times
+     [#]Y          Yank # lines
+     [#]p          Paste default register # times
+     [#]P          Paste default register below current line or behind cursor
+                   position # times
+     m{arg}        Set buffer local line mark arg
+     <^T>          Set global line mark 0. Global marks are always valid
+     {0 2 4 6 8}<^T>
+                   Set a global line mark #
+     {1 3 5 7 9}<^T>
+                   Switch to a global line mark #
+     [#]<^7>{0-9}
+     [#]<^_>{0-9}
+     [#]<^/>{0-9}
+                   Show buffer list and switch based on # or 0-9 index when
+                   prompted
+     <^^>
+     <^6>
+                   Swap to previous buffer
+     [#]<^N>       Swap to next buffer, # changes direction [forward backward]
+     \             Swap to /fm/ buffer b-2
+     {#}\          Swap from /fm/ buffer b-2 and backfill directory listing
+     vb            Recurse into b-1 history buffer. Insert current line into
+                   ex prompt on exit
+     z1            Set alternative keymap to Farsi keymap
+     z2            Set alternative keymap to Russian keymap
+     ze            Switch to English keymap
+     zf            Switch to alternative keymap
+     zL            Set td ex option to 2
+     zl            Set td ex option to 1
+     zr            Set td ex option to -1
+     zR            Set td ex option to -2
+     [#]/          Regex search, move down 1 or # matches
+     [#]?          Regex search, move up 1 or # matches
+     [#]n
+     [#]N
+                   Repeat regex search, move [down up] 1 or # matches
+     <^A>          Regex search 1 word from cursor, no center, wraparound move
+                   [up down]
+     {#}<^A>       Regex search, set keyword to # words from cursor
+     <^]>          Filesystem search forward based on directory listing in b-2
+     {#}<^]>       Filesystem search forward, set keyword to # words from
+                   cursor
+     <^P>          Filesystem search backward based on directory listing in
+                   b-2
+     {#}<^P>       Filesystem search backward, set keyword to # words from
+                   cursor
+     <^Z>          Suspend vi
+     <^L>          Force redraw whole screen and update terminal dimensions
+     qq            Exit and clean terminal, force quit in an & macro
+     zz            Exit and submit history command, force quit in an & macro
+     ZZ            Exit and soft write to a file
 
-- new key mappings (insert):
-^p inserts the contents of the default yank buffer.
-^e and ^f switch to the English and alternate keymap.
+VI REGIONS
+     Regions are vi normal commands that define [h v]range for vi motions.
+     Commands described with the word "move" define a region.
 
-*vi(1) - for features unspecified refer to the respective page in the POSIX manual.
+     <+ j ^M Newline - k h l f F t T , ; B E b e W w { } [ ] ^ 0 $ Space ^H
+             Backspace % ' ` G H L M / ? n N ^A>
 
-NEXTVI FEATURES & CHANGES
--------------------------
-1. Added unindent keybind: ^w
-^w may also take vi_arg1 or motions as a region.
-2. Added key to change the join mode of J key. keybind: vj
-Mode 1 (default) adds a space padding. Mode 0: raw line join.
-3. Added linenumbers, keybind: # (relative numbers are placed after indent)
-Passing vi_arg1 to # enables permanent line numbers.
-4. Added invisible character view, keybind: V
-5. Added regex for changing spaces to tabs, keybind: vi
-6. Added regex for removing \r line endings and trail space/tab, keybind: vo
-7. Changed behavior of ^a to change search direction when no more match. (see 49.)
-8. Added fssearch, searches what is under the cursor or (last search kwd)
-in every file in the opened directory keybind: ^] or ^5
-By default it checks every file, else filter is specified by :inc (see 32.)
-This works in compliance with other changes (see 49. 58.)
-If max number of available buffers reached, the last buffer will be reloaded;
-losing potential unsaved changes. Use fssearch for code navigation between files,
-jump to definitions / etc. fssearch runs 40% faster than busybox's grep,
-benchmark tested (time to find something that doesn't exist) on the linux kernel.
-9. fssearch but going in reverse keybind: ^p
-10. Added key to create a global mark for the current buffer, keybind: ^t
-There are 5 global marks.
-vi_arg1 == 0,2,4,6,8 creates a global mark.
-vi_arg1 == 1,3,5,7,9 switches to the mark.
-0 (default) is a special mark created by fssearch used by ^p as a return
-point for if ^p can't find any more matches.
-11. Added ex command "ea" which opens file using filename substring.
-Setting an extra parameter in form of a number will tell how many matches with
-similar filename to skip.
-For example file might be named "./path/bla/bla/file123.c" but you can open it
-just by "ea fi" if this is a uniquely matched filename.
-12. Added ex command "fd" to set and recalculate the directory listing for
-fssearch or "ea" ex command. No argument implies current directory.
-The "fp" command sets the path without recalculating.
-13. Added numbered buffers to vi, default 10 and ex "b" command to show buffers
-and "b%d" to switch (where %d is the buffer number). Negative buffer numbers
-switch to temp buffers.
-Added new ex command "bx", where the argument will change the number of buffers
-allowed. If the number is lower than number of buffers currently in use they
-will be deallocated. Running bx without an arg will reset to default value.
-The default value is 10 or larger depending on the number of files specified
-in commandline arguments.
-Increasing the number of buffers may result in a positive effect on performance of
-fssearch (8. 9.) if the search keyword does not change. This is because vi
-will remember the position of previous match in the buffer avoiding redundant
-search.
-Improved buffer pathname expansion shortcuts. If you use character % or # in
-ex prompt they will substitute the buffer pathname. % substitutes current
-buffer and # last swapped buffer. Now it is possible to expand any arbitrary
-buffer by using % or # (no difference in this case) followed by the buffer
-number. Example: :!echo "%69" prints the pathname for buffer 69 (if it exists).
-% and # can be escaped normally if path expansion is not wanted.
-Added new ex command "bp" which changes the path for current buffer.
-For example :bp vi.c|e! will repurpose the buffer for vi.c
-Added new ex command "bs" which marks the current buffer as saved. Passing
-an arg will reset undo/redo history. Useful for scripting.
-14. Added key to show buffers and switch buffer
-(to switch press corresponding 0-9 number) keybind: ^7 or ^_
-If vi_arg1 is specified right before ^7 the buffer will be switched immediately
-which also happens to permit numbers > 9.
-15. Added key to exit vi (not saving changes) keybind: qq or zz
-16. Added key to goto first line keybind: gg
-17. Added key to delete everything inside (cursor outside) "" keybind: di" or dc"
-18. Added key to delete everything inside () keybind: di) or dc)
-19. Added key to delete everything inside (cursor outside) () keybind: di( or dc(
-20.
-21.
-22. Added new ex option "ish", this makes every "!" pipe command
-run though interactive shell so that stuff like aliases work. By
-default it is enabled, can be disabled if you need to for some
-odd reason via :se noish
-Every ex command can use # % substitution (see 13). Added a special
-substitution character ! which runs a pipe command. If the closing !
-is not specified, the end of the line becomes a terminator.
-This makes any ex command be able to receive data from the outside world.
-To send data use :w \!less notice how ! is escaped.
-Note: shell integration is one of the most powerful features of nextvi.
-23. Changed the colors to be based on standard ANSI 16 colors desc in conf.c
-Colors can be customized up to 256 colors if the terminal supports it.
-24. Added new syntax highlighting for C, js, html, css, diff...
-25. Added key that splits the line (opposite of J) keybind: K
-K may also take vi_arg1, in which case it will repeat the operation on next
-line.
-26. Added key that line wraps text to 80 line limit keybind: gq
-keybind: gw does the same but floors to the last word and is also
-much slower. gw is a macro, so set td=2 if there is bidi text, it makes a
-difference.
-27. Added key that does multiline repeated edits keybind: v.
-This is based on the last commands and insertions and requires vi_arg1 for
-how many lines to repeat said operation. When last operation was 'i' or other
-commands that enter insert mode and some text, that text will be placed at
-the same offset on N number of lines specified by the vi_arg1.
-28. Added ability to view the numbers for arguments that keys e,w,E,W,b,B
-may take. keybind: ^v Pressing again will change the key mode, specifying
-any vi_arg1 will exit the mode. This is a major step up to how navigation
-works in vi, it makes it so much easier to use because now you can see where
-you are going. These special numbers and their colors can be customized
-through conf.c. As of the latest git version, the feature will work correctly
-even if there is bidi text, double width characters and text reordering.
-29. Added ability to change highlight dynamically. (via syn_reloadft();)
-30. New ex option "hlw" which highlights every instance of word on the
-screen based on cursor position. Useful for when studying source code.
-31. Added autocomplete in insert mode. Press ^g to index the current opened
-file. Then you can press ^n to cycle though the options, results are based on
-the contents of the file and the closest match to what you typed. Use ^r to
-cycle in reverse.
-By default, it will use big regex like [^;...]* to sort out all the punctuation
-chars from words and build a database of words. But in order to take full
-advantage out of the completion system, you can change this regex at runtime
-using new ex command "ac". For example say we don't want word completion
-and we want entire line completion instead, run :ac .*
-If the regex rule allows inclusion of nonalphanumeric or punctuation characters
-you won't be able to retrieve the string like it works with words by default.
-Automatically determining the position from which completion starts
-inside insert sbuf is ambiguous. More fine tuned control is needed and
-can be achieved using new keybind ^z in insert. Use ^z before you type out
-search term, this will set start position for completion, such
-that the options can be looped over inplace. ^z is a toggle, to disable
-it (without exiting insert) press twice in same place. When ^z is set
-^u keybind will delete everything until ^z mark first, otherwise ^u
-operates normally (deletes everything).
-Autocomplete db is persistent throughout all buffers and it also has data
-duplication and redundancy checking such that same files can be indexed many
-times.
-Like ^g used to index file in insert mode, ^y can be used from insert to
-clear out the completion db.
-Running ex command "ac" with no argument will reset back to the default
-word filtering regex. You can find it's string in led.c as a reference.
-Using ^b from insert mode will display all possible autocomplete options.
-Added new ex option "pac". When enabled the autocomplete options will
-be automatically displayed.
-32. Added ex command "inc" which sets the path filter using regex.
-Example 1:
-We want to get only files in submodule directory that end with .c extension:
-:inc submodule.*\.c$
-Example 2:
-Exclude the .git and submodule folders.
-:inc (^[\!.git\!submodule]+[^\/]+$)\|(<optional branch for exceptions here>)
-Running "inc" without an arg will disable all filters.
-33. Added file manager temp buffer keybind: \
- - The buffer can be edited with any directory listing, for example via
- :1,1!find . or filled using built-in methods such as :fd. see (32. 12.)
- - New ex command "cd" changes working directory according to 1st arg.
- - Added key that opens the file based on text from the cursor.
-   keybind: ^i or TAB
-34. Added key to save current file keybind: ^k
-35. The new special character "/" for ft in conf.c now signifies that the
-regex will be applied on any file. "/" is forbidden filename character on
-unix, the filetype that includes "/" is for internal use.
-36. Added a window size signal handler for vi to redraw the screen
-automatically.
-37. Added history buffer for ex commands when in vi prompt.
-keybind: ^b or vb (from normal) will open the buffer with all previous
-commands move the cursor to wanted command and exit buffer with qq
-will copy the command into prompt. To immediately execute the command exit
-with zz. You can also use this when half-way through some command and need to
-access normal mode to edit the command more efficiently. The filename is
-named "/hist/" so that it can't be written to file with ^k (by accident). To
-save history to file use :w yourfilename
-38. Added key to grab the current word(s) under the cursor into prompt like
-so :%s/.../ keybind: vr (see also 49.)
-39. Added ex option to change number of spaces in a tab (\t) default is set
-to 8. use :se tbs=N  (N is number of spaces)
-40. Added partial support for multiline block regex, for example C multiline
-comments syntax highlight.
-41. Made the lowest row to not waste any space when there are no messages and
-actually display the row. Passing vi_arg1 to ^g enables permanent status row.
-42. Search via '/' or '?' automatically centers and redraws screen. This
-partly because change in 41 makes the bottom row behave dynamically and you
-might get search result on displayed on that row, which will be covered by
-search message instead.  Also, centering is nice because you always know
-where to expect the result to be with your eyes.
-43. Added terminal clean up on exit
-44. Added a key to perform relative word replacements keybind: vt
-Specify vi_arg1 and the word(s) under the cursor will be placed into prompt,
-for example :.,.+5s/\<word\>/ where 5 is vi_arg1. (see also 49.)
-45. Improved single line performance by roughly 3x. Syntax highlight will not
-render anything beyond the terminal columns.
-If there is a line in the file that has say 200K characters, the performance
-will not degrade (except the order option set, which is by default). Please do
-not underestimate the difficulty of such endeavor, nextvi is required to take
-all these operations into account:
-	1. Bidi text direction.
-	2. Multibyte UTF-8. Double width chars.
-	3. Variable width tabulations that can change
-	throughout the line based on surroundings.
-	4. Reordering of characters. (regex rules)
-	5. Syntax highlight.
-No other text editor has ever done all these requirements at once, therefore
-come to appreciate what is provided here and the level of performance.
-See also PERFORMANCE section at the end of the file.
-Because syntax highlight is bounded to the terminal dimensions some patterns
-may not be possible to match without rendering past the screen. To address
-this problem you may need some extra patch, see PATCHES section below.
-46. When in ex insert mode, exiting with ^c will discard changes.
-47. Added Russian keymap, and changed how xkmap_alt works, now z + vi_arg1 in
-normal mode will switch what keymap ^f key changes, so for example 1 = fa 2 =
-ru. New language kmap can be added in kmap.h translation array.
-Added non printing characters to the list of digraphs. The naming resembles
-ASCII caret notation. For example, to type 03 (the literal for ^c) enter
-insert mode followed by digraph mode using ^k and type " c" without quotes.
-Additionally, literal can be typed using ^v as in vi(1).
-48. Improvement to change 37. Now when in prompt/insert ^a will bring up the
-latest command from history. Also the history works for searches via / or ?
-the same way. keybind vv does the same but from normal mode, to save time.
-Pressing ^a again goes to next string.
-49. Added ability to get more than 1 word for keybinds ^a ^] ^p vr vt v/
-specified by number (vi_arg1). Regex control chars will be escaped.
-vr vt v/ ^] ^p will grab word(s) only if vi_arg1 >= 1 otherwise the keybind
-will perform a default cursor independent action.
-50. Added ability to edit the line while in insert mode such that backspace
-can delete all the characters on the line, when no more characters left the
-line will be wrapped onto the next one. This is behavior you can expect from
-95% of editors, now nextvi is not an exception. The similar change was done for
-^w keybind.
-51. Added key to show the registers and their contents. keybind: R
-If the length of a register is bigger than the terminal, specify vi_arg1 to
-to shift the printing position by half the screen size vi_arg1 times.
-52. Made feature of reverse text highlight toggleable via new ex option "hlr"
-53. Added a key to disable autoindent. keybind: va
-This is necessary sometimes if you want to paste from system clipboard.
-54. Removed full names of ex commands and options, (seriously, who uses that?)
-now only short and fast to type abbreviations work.
-55. Substitute undo-redo point return to where command was issued initially
-if the affected area is greater than terminal rows.
-56. Modified regex engine to support static lookahead expressions.
-For example [!abc] and [=abc] where ! is negated version of =. This will treat
-"abc" as (a && b && c) logically. It is possible to have multiple in
-one bracket expression as well. For example [!abc!cda!qwe] where each string
-delimited by the ! acts like a typical or operation i.e. [acq] with only
-difference of testing the extra characters ahead. To combine both standard bracket
-expression and lookahead in one, use ^ or ^= where ^ is negated and ^= is default.
-For example: [!abc^=123] characters after ^= match exactly how [123] would.
-57. Added ^l key in insert to clean the terminal and start at first line, remove
-distractions and focus on typing. Useful when running ex via vi -e
-58. Added v/ key in normal, which can grab the current word(s) under the
-cursor into prompt and set the current search string. If valid, the input
-will be used for all search related operations in vi. (see 49.)
-59. Added ability to remember scroll amount for ^e and ^y keys (specified by vi_arg1).
-Advantage of ^e and ^y over using ^u and ^d is keeping the same vi_col position.
-60. Removed bracket classes from regex. Not useful, hard to customize, buggy,
-error prone mess. Doesn't add any new functionality to the regex engine that
-can't be achieved without it.
-61. Nextvi special character escapes work mostly the same way everywhere
-except the following situations:
- - Escapes in regex bracket expressions. This isn't posix but it solves
-couple of issues that were bugged previously, like escaping | in ex
-substitution command, properly counting number of groups in rset.
- - # % and ! characters have to be escaped if they are part of an ex command
- - A single back slash requires 2 back slashes, and so on.
- - rset_make() requires for ( to be escaped if used inside [] brackets.
- - In ex prompt the only separator is "|" character. It can be escaped normally
-   but will require extra back slash if passed into a regular expression.
-62. Added syntax highlighting continuation options. See the struct highlight
-in vi.h. The ^ anchor in the regular expression has an important property of
-being able to efficiently exclude some sub expression from being recomputed
-during the continuation. Take advantage of it when you can.
-63. New ex option "hlp", will highlight the closest pair of symbols {([
-from the cursor, the same way % key works. This feature exists to demonstrate
-complex syntax highlighting capabilities.
-64. Ex options "hll", "hlw", "hlp" fully customizable in conf.c on per ft
-basis the same way you customize per ft highlighting. They must have
-highlight->func struct member set. If ft does not provide a spot in hl, the
-latter feature will not work on that ft, regardless of ex options being set.
-65. Added a key to quickly access :! prompt. keybind: v;
-Removed "make" ex command. Commands like these are not wanted, nextvi shall
-provide a more general purpose solution for the user, like the keybind v; for
-example.
-66. Added new ex option "grp". The following allows definition of target search
-group for / ? n N (31.) autocomplete and ex substitution. This becomes
-necessary when the result of regex search is to be based on some group rather
-than default match group. For example you want to search for the whole line
-but exclude the tabs at the beginning of the line, use regex like this:
-[	]+(.[^ ]+) since only the capture result for 2nd group matters use
-the "grp" like this: :se grp=4 .The number 4 is important, it is calculated
-using: grpnum * 2, to get the second group number do: 2 * 2 = 4. The first
-group is always 2, 1 * 2 = 2, :se grp=2 gets you back to default group/behavior.
-67. Undo and Redo commands (u,^r) may take optional vi_arg1 which repeats the
-operation N times.
-68. Search motions do not terminate with error if the count is greater than
-number of instances found. Last possible match will be used. Important when
-you don't know exactly how many matches there are, does not mean there aren't
-any at all, greedy behavior opens up new use cases.
-69. New ex command "tp", when arg given immediately executes the macro defined
-by arg. It can run any vi normal command and execute insert statements.
-The advantage of tp over traditional macros is in the ability to bypass the
-macro queue and run independently. In a way, macro executed by tp exercises
-the same causality as running C code directly.
-70. Added key to list through the buffers. keybind: ^n
-vi_arg1 changes the direction of ^n.
-71. In insert mode keybind ^o allows access to a secondary ex prompt or new
-vi instance so that it becomes possible to switch to vi from ex or postpone
-some operation, do something else and come back later.  This feature is
-implemented using functionality provided by 69. and exists to prove and
-demonstrate that vi is to some extent REENTRANT as in single threaded
-recursion case, where operations can be safely executed in a separate instance.
-Still, a great amount of care and understanding is needed when making such
-complicated macros.
-72. Added keybinds ^\ and ^] to control the default register for pasting
-(^p) in insert mode. ^\ resets to default yank register.
-^] changes register to the next available, between 0 and 9. Contents
-of the register are displayed on the bottom row. In nextvi, register 0
-stores previous value of default register if operation is atomic
-and did not include a whole line, else register 1 takes its place.
+             All regions
 
-LESSER KNOWN FEATURES
----------------------
-- "Ever tried reading the source code?"
-Yes, that is a lesser known feature, what did you expect?
-Jokes aside (with a level of truth to it), these features exist in many other
-vi implementations but neither man pages cover their functionality in an
-understandable language, describe it here instead.
+VI MOTIONS
+     Motions are vi normal commands that run in a [h v]range.
+     Commands described with the word "region" consume a region.
 
-- @@ macros:
-1. Type out the macro or load from file such that it is in some vi buffer.
-2. Use keybind "ayy on the macro, this will store it in register 'a'
-3. Use @a to play it back, where a stands for that 'a' register
-4. @@ repeats the last macro on next line
+     <^W < > ! c d y "> g~ gu gU
+             All motions
 
-- substitution backreference:
-This inserts the text of matched group specified by \x where x is
-group number. Example:
-this is an example text for subs and has int or void
-:%s/(int)\|(void)/pre\0after
-this is an example text for subs and has preintafter or void
-:%s/(int)\|(void)/pre\2after/g
-this is an example text for subs and has prepreafterafter or prevoidafter
+     <">     Special motions that consume a motion
 
-- ex ranges:
-Some ex commands can be prefixed with ranges.
-Example: print lines 1,5
-:1,5p
-Example: print 5 lines around xrow
-:.-5,.+5p
-Example: print until int is found
-:.,/int/p
-Example: print until int is found in reverse
-:?int?,.p
-Note: in some cases . can be dropped but is kept for readability.
+     dd yy cc g~~ guu gUU >> << <^W><^W> !!
+             Special motions that can use [#] as number of lines
 
-- ex global command:
-Same syntax as ex substitution command, but instead of replacement
-string it takes an ex command after the / / enclosed regex.
-Example: remove empty lines
-:g/^$/d
-Try doing similar with substitution command - will not work as removing '\n'
-without deleting the line is invalid, but it will work with global command.
-Multiple ex commands can be chained in one global command.
-In this case the ex separator has to be escaped once.
-Example: yank matches and print them out.
-:g/int/ya A\|p
-If you wanted to get really fancy, it is possible to nest global commands
-inside of global commands.
-Example: find all lines with int and a semicolon and append "has a semicolon"
-:g/int/:.g/;/tp A has a semicolon
+     Examples:
+     3d/int  Delete text until the 3rd instance of "int" keyword
+     d3w     Delete 3 words
+     "ayl    Yank a character into <a> register
+     "Ayw    Append a word to <a> register
 
-- search motions:
-? and / searches have the ability to be used as motions. This seems very
-counter intuitive and one would have never ever figure out that this
-feature even exists, unless noted. Even if you read the source code it's
-very easy to miss. How to use: optionally specify vi_arg1, specify the motion
-using it's keybind, then do / or ? and type out the search term.
-The motion ends on the first match by default (no vi_arg1 specified).
-The optional vi_arg1 determines how many matches of the term to skip until the
-motion ends. Example: you see that the next 10 lines have the word "int"
-which is included 3 times. You want to delete text until the 3rd
-instance of "int" keybind would be 3d/int . Likewise you can opt out
-of the "specify motion" part and just use / or ? with vi_arg1 to perform
-specific searches.
+VI/EX INSERT
+     <^H>
+     <Backspace>
+                   Delete a character
+     <^U>          Delete util <^X> mark or everything
+     <^W>          Delete a word
+     <^T>          Increase indent
+     <^D>          Decrease indent
+     <^]>          Switch default paste register to registers 0-9
+     <^\>{arg}     Select paste register arg. <^\> selects default register
+     <^P>          Paste a register
+     <^X>          Mark autocomplete and <^U> starting position. <^X> resets
+                   the mark
+     <^G>          Index buffer for autocomplete
+     <^Y>          Reset autocomplete data
+     <^R>          Loop through autocomplete options backward
+     <^N>          Loop through autocomplete options forward
+     <^B>          Print autocomplete options when in vi insert
+     <^B>          Recurse into b-1 history buffer when in ex prompt. Insert
+                   current line into ex prompt on exit
+     <^A>          Loop through lines in a history buffer b-1
+     <^Z>          Suspend vi/ex
+     <^L>          Redraw screen in vi mode, clean terminal in ex
+     <^O>          Switch between vi and ex modes recursively
+     <^E>          Switch to english keymap
+     <^F>          Switch to alternative keymap
+     <^V>{arg}     Read a literal character arg
+     <^K>{arg}     Read a digraph sequence arg
+     <^C>
+     <ESC>
+                   Exit insert mode
 
-- Majestic EXINIT environment variable
-At the zenith of your vi/nextvi education you'll find that EXINIT can be
-used to achieve arbitrary level of customization. Using new ex command "tp"
-any sequence of vi/ex commands can be performed at startup. This is where
-real "groking vi" starts.
-Example 1:
-There is a dictionary file (assume vi.c), which we always want to have indexed
-at startup for autocomplete feature in 31.
-export EXINIT="e ./vi.c|tp i|u|bx 1|bx"
-The last "bx" commands delete the vi.c buffer. "u" can be used to unmark vi.c
-as being modified. To keep it around as a buffer remove the "bx" commands.
-Example 2:
-Load your shell's history into vi's history buffer and adjust the data such
-that it is usable by appending ! at the beginning of command and escaping the "|"
-pipes the way ex prompt expects them (see 61.)
-export EXINIT="e /root/.ash_history|tp yG:p:%s/^/\!\\|%s/ \| / \\\\\\| /g
-qq|bx 1|bx|ft"
-Congratulations, vi has unofficially replaced your shell's frontend.
-Example 3:
-Setup some custom @@ macros in your favorite registers.
-export EXINIT="e|tp io{
-}kA|tp 1G|tp 2\"ayy"
-This macro gets loaded into register a, when @a is executed the macro will
-create { and closing } below the cursor leaving cursor in insert mode in
-between the braces. This is something you would commonly do in C like
-programming language.
- - CRITICAL - the new line inside the EXINIT string is literal, it's best to
-   store the export command in a .sh file and set it using:
-   $ . ./init.sh
-   Otherwise this examples 2 and 3 may not work!!!
-To suppress EXINIT variable use -s commandline flag.
+EX
+     Ex is a powerful line editor for Unix systems, initially developed
+     by Bill Joy in 1976. This essential tool serves as the backbone
+     of vi, enabling it to execute commands, macros and even transform
+     into a purely command-line interface (CLI) when desired.
 
-- Uppercase registers
-In vi uppercase registers append to the lowercase register instead of
-overwriting the register completely. This is very useful, for example,
-use global and yank ex commands together:
-:g/searchterm/ya A
-Now we can use "ap and paste all the lines matched by the regex. Depending
-on the usecase simply :g/searchterm/ya or :g/searchterm/p may also be enough.
+EX PARSING
+     Parsing follows the structure:
+     [<:>][range][sep][cmd][<sep>][args][<:>]
+     Ex commands are initiated and separated by <:> prefix. Fields
+     can be separated by <Space> or <Tab>. There can only be one separator
+     in between [cmd] and [args]. To avoid ambiguity, it is recommended
+     to always use a separator between [cmd] and [args] in scripts.
 
-PATCHES
--------
-New functionality can be obtained through optional patches provided in the
-patches branch. If you have a meaningful contribution and would love to be
-made public the patch can be submitted via email or github pull request.
+     Examples:
+     :evi.c
+             Evaluates to ":e vi.c"
+     :eabc
+             Evaluates to ":ea bc" not ":e abc"
+     :e  vi.c
+             Edit " vi.c". [<sep>] is required
 
-FAQ:
-----
-Q1: What's the best way to learn vi/nextvi?
-A1: First ensure you know basic movements hjkl this would suffice.
-Start reading vi.c don't worry about the rest of this readme until later.
-Running ./vi vi.c use / and n N keybinds for search and look for switch cases.
-The keybinds are encoded to be intuitive. Once you find some case that looks
-like a keybind read the code, if you don't understand try to reproduce the
-keybind to better understand what the code does. You have to do this, if you
-omit this step you will never be able to realize the full potential that the
-software provides. It's not desirable to live in the dark using this
-software for the next 10 years only to find that for example, ^p in insert
-mode exists and is very useful. If you can't figure how to use the keybind at
-least you would know at the back of your mind that there is something there,
-realization will come later. It's better to skim look through the switch
-cases than to never even open it. This isn't an excuse, but a deliberate
-design goal, where the user reads the code in order to achieve the full
-control he/she desires.
-LOC:
-+--------------+---------------------+
-| 569  kmap.h  | keymap translation  |
-| 428  vi.h    | definitions/aux     |
-+--------------+---------------------+
-| 577  uc.c    | UTF-8 support       |
-| 318  term.c  | low level IO        |
-| 298  conf.c  | hl/ft/td config     |
-| 652  regex.c | extended RE         |
-| 590  lbuf.c  | file/line buffer    |
-| 1083 ex.c    | ex options/commands |
-| 2085 vi.c    | normal mode/general |
-| 685  led.c   | insert mode/output  |
-| 384  ren.c   | positioning/syntax  |
-| 6670 total   | wc -l *.c           |
-+--------------+---------------------+
-The code is devised to be unquestionable.
-You will be able to read, understand and modify this code faster.
-Come back to this readme regularly as it documents more advanced behavior.
+EX ESCAPES
+     Special characters in [args] will become regular when escaped
+     with <\>.
 
-Q2: What does it mean when I call feature X a macro?
-A2: It's the kind of shortcut that does not change the core functionality,
-but rather reuses the core functionality. Usually macro features are
-implemented in 1 or a few lines of code. Notably, they tend to use function
-term_push(), but it's not required. Because they are macros they may run
-suboptimally or not handle every possible edge case. When calling a macro
-feature from another macro, the results are pushed back, which means the
-macro feature will always execute last, with the exception of feature 69.
-These features are considered a macro: 5. 6. 16. 17. 18. 19. 26. 27. 34. 65. 71.
+     <( ^ ! = [ ] \>
+             Special characters in regex "[]" bracket exp
+     <( ) { } + * ? ^ $ [ ] | \< \> . \>
+             Special characters in regex
+     <# % ! :>
+             Special characters in ex
 
-Q3: Keybind with CTRL does not work?
-A3: vi is reading ASCII codes sent by the terminal. Depending on the
-keyboard, the ASCII code could be another key combination. It was reported
-that "^^" (Ctrl + ^) can be achieved on some system with "^6". If something
-doesn't work, have a look at the layout of an american/british keyboard and
-try to reproduce the keybind as if you have an american/british keyboard.
+EX EXPANSION
+     Characters <# %> in [args] substitute the buffer pathname.
+     <%> substitutes current buffer and <#> last swapped buffer.
+     It is possible to expand any arbitrary buffer by using <# %>
+     followed by the buffer number.
 
-Q4: Why nextvi instead of vim?
-A4: I prefer customization in source code, Vim is considered harmful.
+     Example: print the pathname for buffer 69.
+     :!echo "%69"
 
-Q5: Why not distribute as patches, like on suckless.org?
-A5: It's hard to maintain. Simply put, there are too many changes
-to keep track of if compared to original neatvi.
+     Every ex command is be able to receive data from external process
+     through a special expansion character <!> which pipes the data
+     into the command itself. If the closing <!> is not specified,
+     the end of the line becomes a terminator.
 
-Q6: Why are keybinds encoded as pure switch cases instead of more
-suckless.org style keybind function table dispatch?
-A6: Because we want small efficient code that is easy to write.
-In nextvi many keybinds interoperate so that they can do multiple tasks at
-various conditions. Use of goto is encouraged, it is simply impossible to
-achieve this behavior in a sensible way otherwise. Suckless code style
-philosophy crumples when requirements are as complex as what vi needs to be
-able to do. In other words, it depends - but if the standard of C provides
-means to implementing things cleaner and faster you should use the smallest
-form factor possible. In retrospect, it may be harder to find the
-implementation itself, but once you do there is nothing else hidden from you.
-The result is unabstracted program control flow that can be easily read and
-modified reducing the risks of unforeseen side effects.
+     Example: Substitute "int" with the value of $RANDOM
+     :%s/int/!printf "%s" $RANDOM!
+     Example: Insert output of ls shell command
+     :& i!ls
 
-Q7: General philosophy?
-A7: User is programmer, hacker culture.
-In most text editors, flexibility is a minor or irrelevant design goal.
-Nextvi is designed to be flexible where the editor adapts to the user needs.
-This flexibility is achieved by heavily chaining basic commands and allowing
-them to create new ones with completely different functionality. Command
-reuse keeps the editor small without infringing on your freedom to quickly
-get a good grasp on the code. If you want to customize anything, you should
-be able to do it using the only core commands or a mix with some specific C
-code for more difficult tasks. Simple and flexible design allows for straight
-forward solutions to any problem long term and filters bad inconsistent ideas.
+EX RANGES
+     Some ex commands can be prefixed with ranges.
 
-Q8: Something, something - pikevm
-A8: Pikevm is a complete rewrite of nextvi's regex engine for the purposes of
-getting rid of backtracking and severe performance and memory constraints.
-Pikevm guarantees that all regular expressions are computed in constant space
-and O(n+k) time where n is size of the string and k is some constant for the
-complexity of the regex ie. number of state transitions. It is important to
-understand that it does not mean that we run at O(n) linear speed, but rather
-the amount of processing time & memory usage is distributed evenly and linearly
-throughout the string, the k constant plays a big role. If you are familiar
-with radix sort algorithms this follows the same idea.
-Q: What are the other benefits?
-A: For example, now it is possible to compute a C comment /* n */ where n can
-be an infinite number of characters. Of course this extends to every other
-valid regular expression.
-Q: New features pikevm supports?
-A: Additionally, pikevm supports PCRE style non capture group (?:) and lazy
-quantifiers like .*? and .+?? because they were easy to implement and allow
-for further regex profiling/optimization.
-Q: NFA vs DFA (identify)
-A: pikevm = NFA backtrack = DFA
-Q: What's wrong with original implementation?
-A: Nothing except it being slow and limited. My improved version of Ali's DFA
-implementation ran 3.5X faster in any case, however I found a bug with it
-where quested "?" nested groups compute wrong submatch results. To fix this
-problem, it would require to undo a lot of optimization work already done,
-basically going back to how slow Ali's implementation would be. The reason
-this was spotted so late was because this kind of regex wasn't used before,
-so I never tested it. Other than that I think submatch extraction is correct
-on other cases. Pikevm does not have this bug, so it will be used as main
-regex engine from now on, unless dfa ever finds a proper fix. Honestly, this
-change isn't so surprising, as I was working on pikevm a few months prior, to
-favor a superior algorithm.
-You can still find that code here (likely with no updates):
-https://github.com/kyx0r/nextvi/tree/dfa_dead
-As a downside, NFA simulation looses the DFA property of being able to
-quickly short circuit a match, as everything runs linearly and at constant
-speed, incurring match time overhead. Well optimized DFA engine can
-outperform pikevm, but that is rather rare as they got problems of their own.
-For example as independently benchmarked, dfa_dead runs only 13% faster than
-pikevm and that is stretching the limit of what is physically possible on a
-table based matcher. Can't cheat mother nature, and if you dare to try she's
-unforgiving at best.
-Supplementary reading by Russ Cox:
-https://swtch.com/~rsc/regexp/regexp1.html
+     [. - +][1-9 %][sep][, ;][. - +][1-9 $]
+             Numeric ranges
+     </ ?>{kwd}[</ ?>]
+             Search ranges
+     <'>{mark}
+             Mark ranges
 
-PERFORMANCE
------------
-Stress test:
-1. Compile both versions with gcc -O2 -g (no customizations done)
-2. Open Nextvi's vi.c and hold ^d until the end of the file
-3. Capture the results with cachegrind
-4. To find out what these values mean see:
-https://valgrind.org/docs/manual/cg-manual.html
-NEATVI:
---------------------------------------------------------------------------------
-| I   refs:      1,030,137,070
-| I1  misses:          122,660
-| LLi misses:            1,298
-| I1  miss rate:          0.01%
-| LLi miss rate:          0.00%
-|
-| D   refs:        672,331,702  (373,790,802 rd   + 298,540,900 wr)
-| D1  misses:          473,511  (    215,088 rd   +     258,423 wr)
-| LLd misses:            7,836  (      1,116 rd   +       6,720 wr)
-| D1  miss rate:           0.1% (        0.1%     +         0.1%  )
-| LLd miss rate:           0.0% (        0.0%     +         0.0%  )
-|
-| LL refs:             596,171  (    337,748 rd   +     258,423 wr)
-| LL misses:             9,134  (      2,414 rd   +       6,720 wr)
-| LL miss rate:            0.0% (        0.0%     +         0.0%  )
---------------------------------------------------------------------------------
-NEXTVI:
---------------------------------------------------------------------------------
-| I   refs:      364,197,180
-| I1  misses:         93,186
-| LLi misses:          1,228
-| I1  miss rate:        0.03%
-| LLi miss rate:        0.00%
-|
-| D   refs:      142,125,211  (100,909,090 rd   + 41,216,121 wr)
-| D1  misses:        140,991  (     81,656 rd   +     59,335 wr)
-| LLd misses:          6,043  (      1,855 rd   +      4,188 wr)
-| D1  miss rate:         0.1% (        0.1%     +        0.1%  )
-| LLd miss rate:         0.0% (        0.0%     +        0.0%  )
-|
-| LL refs:           234,177  (    174,842 rd   +     59,335 wr)
-| LL misses:           7,271  (      3,083 rd   +      4,188 wr)
-| LL miss rate:          0.0% (        0.0%     +        0.0%  )
---------------------------------------------------------------------------------
-Further optimization:
-1. To create the most optimal exe, enable PGO optimizations by compiling via
-./build.sh pgobuild which can lead to a significant performance boost on some
-application specific tasks. Feel free to adjust build.sh and the sample data
-on which it's being trained on, though default probably already good enough.
-2. To improve nextvi's performance, shaping, character reordering, and
-syntax highlighting can be disabled by defining the EXINIT environment
-variable as "se noshape | se noorder | se nohl | se td=+2".
+     Examples:
+     .       current position
+     ,       vertical range separator
+     ;       horizontal range separator
+     :1,5p   print lines 1,5
+     :.-5,.+5p
+             print 5 lines around xrow
+     :/int/p
+             print first occurrence of int
+     :?int?p
+             print first occurrence of int in reverse
+     :.,/int/p
+             print until int is found
+     :?int?,.p
+             print until int is found in reverse
+     :'d,'ap
+             print lines from mark <d> to mark <a>
+     :%p     print all lines in the buffer
+     :$p     print last line in the buffer
+     :;50    goto character offset 50
+     :10;50  goto line 10 character offset 50
+     :10;.+5
+             goto line 10 +5 character offset
+     :'a;'a  goto line mark <a> offset mark <a>
+     :;$     goto end of the line
+     :5;/int/
+             search for int on line 5
+     :.;?int?
+             search for int in reverse on the current line
 
-Favorite quotes:
---------------------------------------------------------------------------------
+EX COMMANDS
+     [range]f{/?}[kwd]
+             Ranged search (stands for find)
 
-"All software sucks, but some do more than others."
-	- Kyryl Melekhin
+             Example: no range given, current line only
+             :f/int
+             Example: reverse
+             :f?int
+             Example: range given
+             :10,100f/int
+             Subsequent commands within the range will move to the next match
+             just like vi n/N commands.
 
-"Educated decisions assert the quantitative quality first."
-	- Kyryl Melekhin
+     b[#]    Print currently active buffers state or switch to a buffer
 
-"It’s possible that I understand better what’s going on, or
-it’s equally possible that I just think I do."
-	— Russ Cox
+             Example: switch to the 5th buffer
+             :b5
 
-"Vigorous writing is concise. A sentence should contain no unnecessary words
-[and] a paragraph no unnecessary sentences, for the same reason that a drawing
-should have no unnecessary lines and a machine no unnecessary parts. This
-requires not that the writer make all his sentences short, or that he avoid
-all detail and treat his subjects only in outline, but that every word tell."
-	— Elements of Style, William Strunk, Jr. - 1918
---------------------------------------------------------------------------------
+             There are two temporary buffers which are separate from
+             the main buffers.
+             b-1 = /hist/ ex history buffer
+             b-2 = /fm/ directory listing buffer
+             Example: switch to the b-1 buffer
+             :b-1
+             Example: switch to the b-2 buffer
+             :b-2
 
-CREDITS
-=============
-Programming
--------------
-Kyryl Melekhin (kyx0r)
-Ali Gholami Rudi (aligrudi)
+     bp[path]
+             Set current buffer path
+     bs[#]   Set current buffer saved. If any arg given, reset undo/redo
+             history
 
-Documentation / Design / Testing
--------------
-Kyryl Melekhin (kyx0r)
+     [range]p
+             Print line(s) from the buffer
 
-Proofreading
--------------
-Kyryl Melekhin (kyx0r)
-Cédric (Vouivre)
+             Example: utilize character offset ranges
+             :1,10;5;5p
+             Example: print current line from offset 5 to 10
+             :.;5;10p
 
-Special Thanks
--------------
-Ali Gholami Rudi (vi https://github.com/aligrudi/neatvi)
-ArmaanB (bsd test)
-aabacchus (build.sh)
-illiliti (build.sh)
-git-bruh (feedback)
-and all users, posters & haters :/
+     ea[kwd] [#]
+             Open file based on filename substring from dir listing in b-2
+
+             Requires directory listing in b-2 backfilled prior.
+             Example: backfill b-2 using :fd
+             :fd
+             Example: backfill b-2 using find
+             :b-2:1,$!find .
+
+             If the substring matches more than one filename, a prompt will
+             be shown. Submit using numbers 0-9 (higher ascii values work
+             too (<^C> to cancel)). Passing an extra arg to :ea in form of
+             a number will bypass the prompt and open the corresponding file.
+             Example: open filename containing "v"
+             :ea v
+             Example: open first match containing "v"
+             :ea v 0
+
+     ea![kwd] [#]
+             Forced version of ea
+
+     [#]a[str]
+     [#]i[str]
+     [#]c[str]
+             Enter ex {append insert change} mode
+
+             # determines insertion line number.
+             str determines initial input into the insertion buffer.
+
+             Example: insert "hello" in vi/ex
+             :i hello<^M><ESC>
+             Example: discard changes in vi/ex
+             :i hello<^C>
+             Example: immediately insert "hello"
+             :i hello<^V><^M><^V><ESC>
+             Example: insert "hello" in raw ex mode
+             i hello<^M>.<^M>
+
+     [range]d
+             Delete line(s)
+     e[path]
+             Open a file at a path
+
+             No argument opens "unnamed" buffer.
+     e![path]
+             Force open a file at a path
+
+             No argument re-reads the current buffer from the filesystem.
+
+     [range]g{*}[kwd]{*}{cmd}
+             Global command
+
+             Execute an ex command on a range of lines that matches an
+             enclosed regex.
+
+             Example: remove all empty lines
+             :g/^$/d
+
+             Multiple ex commands can be chained in one global command.
+             To chain commands, the ex separator <:> must be escaped once.
+             Example: yank matches appending to reg 'a' and print them out.
+             :g/int/ya A\:p
+
+             It is possible to nest global commands inside of global commands.
+             A global command will not be executed on lines that were created
+             or deleted by a nested global command.
+             When range not given, a nested global command is executed on
+             the current line.
+
+             Example: Nested global command
+             Append "has a semicolon" to all lines that contain "int" and
+             end with <;>.
+             :g/int/g/;$/& A has a semicolon
+
+             Example: extract/print data enclosed in "()"
+             :g/\(.+\)/;0;/\(.+\)/\:.;.+1k a\:se grp=2\:;/\)*(\))/\:
+             se nogrp\:k s\:.;'a;'sp
+
+     [range]g!{*}[kwd]{*}{cmd}
+             Inverted global command
+     [range]=
+             Print the current range line number
+
+     [range]k[mark]
+             Set a line mark
+
+             The character offset is set to the current position.
+
+     &{macro}
+             Global non-blocking macro
+
+             Execute raw vi/ex input sequence.
+             A non-blocking macro shall not wait for input when the end of
+             the sequence is reached. A non-blocking macro executing other
+             macros will always reach a terminating point.
+             Example: execute vi insert statement
+             :& ihello
+             Example: execute :hello
+             :& \:hello<^V><^M>
+             Example: execute vi ci(int macro
+             :& ci(int
+             Example: nest blocking macro inside non-blocking
+             :& \:@ \\:blocking<^V><^M>i continue in non-blocking
+
+     @{macro}
+             Global blocking macro
+
+             Execute raw vi/ex input sequence.
+             A blocking macro shall wait for input when the end of the sequence
+             is reached. A blocking macro executing other macros may result
+             in congestion.
+             Example: execute vi insert statement
+             :@ ihello
+             Example: insert "hello" into <:> vi prompt
+             :@ \:hello
+             Example: execute vi ci(int macro
+             :@ ci(int
+             Example: execute ci(int exiting insert mode
+             :@ ci(int<^V><^C>
+             Example: execute ci)INT as a follow-up
+             :@ ci(int<^V><^C>ci)INT
+             Example: execute vi dw command after user exits insert
+             :@i:@dw
+
+     pu[register] [cmd]
+             Paste a register
+
+             To pipe register data to an external process use :pu \![cmd]
+             Example: copy default register to X11 clipboard
+             :pu \!xclip -selection clipboard
+
+     [range]r[path cmd]
+             Read a file or a pipe
+
+             To read data from a pipe use :[range]r \![cmd]
+             Example: pipe in only the first line
+             :r \!ls
+             Example: pipe in only lines 3,5
+             :3,5r \!ls
+             Example: pipe in all data
+             :%r \!ls
+
+     [range]w[path cmd]
+             Write to a file or a pipe
+
+             To pipe buffer data to external process use :[range]w \![cmd]
+             Example: pipe out all data into less
+             :w \!less
+             Example: pipe out only first 10 lines
+             :1,10w \!less
+
+     [range]w![path]
+             Force write to a file
+
+     q       Exit
+     q!      Force quit
+
+     wq[!]
+     x[!]
+             Soft write and exit or force quit
+
+     u[# $]  Undo # times or all with $
+     rd[# $]
+             Redo # times or all with $
+
+     se{exp}
+             Set ex option variable
+
+             Example: set using implications
+             :se hll
+             :se nohll
+             Example: set using numeric values
+             :se hll=1
+             :se hll=0
+             Example: set using ascii values
+             :se hll=a
+
+     [range]s{*}[kwd]{*}{str}[*][opts]
+             Substitute
+
+             Find and replace text in a range of lines that matches an
+             enclosed regex with an enclosed replacement string.
+
+             Example: global replacement
+             :%s/term1/term2/g
+
+             Substitution backreference inserts the text of matched group
+             specified by \x where x is group number.
+
+             Example: substitution backreference
+             this is an example text for subs and has int or void
+             :%s/(int)|(void)/pre\0after
+             this is an example text for subs and has preintafter or void
+             :%s/(int)|(void)/pre\2after/g
+             this is an example text for subs and has prepreafterafter or prevoidafter
+
+     [range]ya[register][append]
+             Yank a region
+
+             To append to the register, pass in its uppercase version.
+             To append to any of the non-alphabetical registers add any extra
+             character to the command.
+             Example: append to register <1>
+             :ya 1x
+
+     ya![register]
+             Reset register value
+
+     [range]![cmd]
+             Run external program
+
+             When ex range specified, pipes the buffer data to an external
+             process and pipes the output back into current buffer replacing
+             the affected range.
+             Example: infamously sort the buffer
+             :1,$!sort
+
+     ft[filetype]
+             Set a filetype
+
+             No argument prints the current file type.
+             Reloads the highlight ft, which makes it possible to reset dynamic
+             highlights created by options like "hlw".
+
+     cm[keymap]
+             Set a keymap
+
+             No argument prints the current keymap name.
+
+     cm![keymap]
+             Set an alternative keymap
+
+     fd[path]
+             Set a secondary directory (stands for file dir)
+
+             Recalculates the directory listing in b-2 buffer.
+             No argument implies current directory.
+
+     fp[path]
+             Set a directory path for :fd (stands for file path)
+
+     cd[path]
+             Set a working directory (stands for change dir)
+
+             Currently open buffers' file paths will be automatically adjusted
+             to reflect a newly set working directory.
+
+     inc[regex]
+             Include regex for :fd calculation
+
+             Example: include only files in submodule directory that end with .c
+             :inc submodule.*\.c$
+             Example: exclude the .git and submodule folders
+             :inc (^[\!.git\!submodule]+[^\/]+$)
+             No argument disables the filter.
+
+     reg[hscroll]
+             Print registers and their contents
+
+             Printing position is determined by xcols / 2 * [hscroll]
+
+     bx[#]   Set max number of buffers allowed
+
+             Buffers will be deallocated if the number specified is lower
+             than the number of buffers currently in use.
+             No argument will reset to the default value of 10.
+
+     ac[regex]
+             Set autocomplete filter regex
+
+             Example: autocomplete using whole lines from the buffer
+             :ac .+
+             No argument resets to the default word filter regex as defined
+             in led.c.
+
+     uc      Toggle multibyte utf-8 decoding
+
+             This command is particularly useful when editing files with
+             mixed encodings, binary files, or when the terminal does not
+             support UTF-8 or lacks the necessary fonts to display UTF-8
+             characters. It's often paired with :ph command to achieve
+             hex editor-like functionality.
+
+     uz      Toggle zero width placeholders
+
+             Use only if you need to hide zero width characters.
+
+     ub      Toggle combining multicodepoint placeholders
+
+             Use only if your terminal can render multicodepoint utf-8 (emojis).
+
+     ph[#clow] [#chigh] [#width] [#blen][*char]
+             Redefine placeholders
+
+             This command replaces placeholders defined in conf.c
+             and subsequent :ph commands expand the list of placeholders.
+             Example: render 8 bit ascii (Extended ASCII) as <~>
+             :ph 128 255 1 1~
+             Example: flawless ISO/IEC 8859-1 (latin-1) support
+             :uc:ph 128 160 1 1~
+             Example: render control byte 03 as "^C"
+             :ph 3 3 2 1^C
+             Example: reset to default as in conf.c
+             :ph
+             Example: disable default placeholders in conf.c
+             :ph:ph0
+
+EX OPTIONS
+     ai=1    Indent new lines
+     ic=1    Ignore case in regular expressions
+
+     ish=0   Interactive shell
+
+             Run every <!> command through an interactive shell.
+             The shell will source the .rc file before command execution.
+             This makes it possible to use predefined functions, aliases
+             and ENV variables from the .rc file.
+             Precondition 1:
+                     The .rc filename is shell specific, such as .bashrc in Bash
+                     and .zshrc in Zsh.
+             Precondition 2:
+                     The environment variable $SHELL determines the default
+                     shell, otherwise it defaults to /bin/sh.
+             Precondition 3:
+                     There must be no stdout output created by .rc file
+                     for <!> commands to return expected results.
+
+     grp=0   Regex search group
+
+             Defines a target search group for any regex search operation.
+             This becomes necessary when the result of regex search is to
+             be based on some group rather than default match group.
+
+             Example: ignore tabs at the start of the line
+             :se grp=2:1,$f/^[       ]+(.+):se nogrp
+
+             The value of grp is calculated using (group number * 2).
+
+     hl=1    Highlight text based on rules defined in conf.c
+     hlr=0   Highlight text in reverse direction
+     hll=0   Highlight current line based on filetype hl
+     hlp=0   Highlight "[]" "()" "{}" pairs based on filetype hl
+     hlw=0   Highlight current word based on filetype hl
+     led=1   Enable all terminal output
+
+     vis=0   Control startup flags
+
+             Example: disable :e message in ex mode
+             :se vis=12
+             Example: disable :e message in vi mode
+             :se vis=8
+             Example: enable raw ex mode
+             :se vis=6
+             Example: disable raw ex mode
+             :se vis=4
+
+     mpt=0   Control vi prompts
+
+             When set to 0 after an ex command is called from vi, disables
+             the "[any key to continue]" prompt.
+             If mpt is negative, the prompt will remain disabled.
+
+     order=1
+             Reorder characters based on rules defined in conf.c
+     shape=1
+             Perform Arabic script letter shaping
+     pac=0   Print autocomplete suggestions on the fly
+     tbs=8   Number of spaces used to represent a tab
+     td=1    Current text direction context
+
+             This option accepts four meaningful values:
+             +2      Exclusively left-to-right
+             +1      Follow dircontexts[] (in conf.c), defaulting to left-to-
+                     right
+             -1      Follow dircontexts[], defaulting to right-to-left
+             -2      Exclusively right-to-left
+
+     pr=0    Print register
+
+             Set a special register using a character or a number.
+             Once the register is set, all data passed into ex_print will
+             be stored in the register.
+             If the register is uppercase, <Newline> characters are added
+             to match the exact output that was printed.
+             Example: paste current buffer list exactly like from :b command
+             :se pr=A:ya! a:b:pu a
+             Example: store a line printed with :p
+             :se pr=A:ya! a:p
+
+     sep=:   Ex separator
+
+             Set Ex command separator character.
+             Changing default <:> separator will break some built-in commands/macros.
+             Example: set separator to <|>
+             :se sep=|
+             Example: disable separator
+             :se nosep
+
+EXINIT ENV VAR
+     EXINIT defines a sequence of vi/ex commands to be performed
+     at startup. Consequently, this is the primary way for scripting
+     and customizing Nextvi outside of C.
+     Many standard text processing utils such as grep, awk, sed
+     can be replaced by Nextvi with EXINIT in mind.
+
+     Examples:
+
+     export EXINIT=$'e ./vi.c:& i\x7\x3:bx 1:bx'
+             Index vi.c for autocomplete
+
+     export EXINIT='b-1:%r ./vi.c:b-1'
+             Load vi.c into a history buffer
+
+     export EXINIT=$'e:& io{\n}\x16\x3kA\x3:& 1G:& 2\"ayy'
+             Setup @ macro in register <a>
+
+             @a macro creates <{> and closing <}> below the cursor leaving
+             cursor in insert mode in between the braces.
+
+REGEX
+     Nextvi's regex syntax is akin to that of Plan 9.
+     Disregard manpage notation for <{ } [ ]> in this section.
+
+     .       match any single char
+     ^       assert start of the line
+     $       assert end of the line
+     {N,M}   match N to M times
+     ()      grouping
+     (?:)    non capture grouping
+     [N-M]   match a set of alternate ranges N to M
+     *       repeated zero or more times
+     +       repeated one or more times
+     |       union, alternative branch
+     \<      assert start of the word
+     \>      assert end of the word
+     ?       one or zero matches greedy
+     ??      one or zero matches lazy
+
+     Additionally, Nextvi supports static lookahead expressions.
+     /[=abc]
+             find <a> followed by "bc"
+     /[!abc]
+             find anything except <a> followed by "bc"
+     /[!abc!cda!qwe]
+             multiple lookahead alternatives in one bracket exp
+     /[!abc^=123]
+             disable lookahead after "^=" specifier and match [123] normally
+
+SPECIAL MARKS
+     *       position of the previous change
+     [       first line of the previous change
+     ]       last line of the previous change
+     '       position of the previous line region
+     `       position of the previous line region
+
+SPECIAL REGISTERS
+     /       previous search keyword
+     :       previous ex command
+     0       previous value of default register (atomic)
+             Atomic means the operation did not include a <Newline>.
+     1-9     previous value(s) of default register (nonatomic)
+
+CODE MAP
+     +--------------+----------------------+
+     | 505 vi.h     |  definitions/aux     |
+     | 537 kmap.h   |  keymap translation  |
+     +--------------+----------------------+
+     | 293 conf.c   |  hl/ft/td config     |
+     | 341 term.c   |  low level IO        |
+     | 380 ren.c    |  positioning/syntax  |
+     | 521 lbuf.c   |  file/line buffer    |
+     | 650 uc.c     |  UTF-8 support       |
+     | 658 regex.c  |  extended RE         |
+     | 675 led.c    |  insert mode/output  |
+     | 1240 ex.c    |  ex options/commands |
+     | 1947 vi.c    |  normal mode/general |
+     | 6705 total   |  wc -l *.c|sort      |
+     +--------------+----------------------+
+
+COMPILING
+     export CC='g++ -x c'
+             set compiler, g++ example
+     export CFLAGS='-s'
+             set CFLAGS, strip example
+     ./cbuild.sh
+             build once
+     ./cbuild.sh build
+             build
+     ./cbuild.sh debug
+             build with -O0 -g
+     ./cbuild.sh pgobuild
+             PGO build can lead to a significant performance boost on some
+             application specific tasks
+     ./cbuild.sh install
+             install vi to $DESTDIR$PREFIX/bin
+     ./cbuild.sh fetch
+             merge commits from upstream repository
+     ./cbuild.sh bench
+             performance bench test 2000 word deletions on vi.c
+
+PHILOSOPHY
+     In most text editors, flexibility is a minor or irrelevant design
+     goal. Nextvi is designed to be flexible where the editor adapts
+     to the user needs. This flexibility is achieved by heavily chaining
+     basic commands and allowing them to create new ones with completely
+     different functionality. Command reuse keeps the editor small
+     without infringing on your freedom to quickly get a good grasp
+     on the code. If you want to customize anything, you should be
+     able to do it using only core commands or a mix with some specific
+     C code for more difficult tasks. Simple and flexible design
+     allows for straight forward solutions to any problem long term
+     and filters bad inconsistent ideas.
+
+     "All software sucks, but some do more than others."
+             - Kyryl Melekhin
+
+SEE ALSO
+     New functionality can be obtained through optional patches provided
+     in the patches branch. If you have a meaningful contribution
+     and would love to be made public the patch can be submitted
+     via email or github pull request.
+     https://github.com/kyx0r/nextvi/tree/patches
+
+     Scripts used to generate this manual are located in the manual
+     branch.
+     https://github.com/kyx0r/nextvi/tree/manual
+
+     Q: What is pikevm?
+     A: Pikevm is a complete rewrite of Nextvi's regex engine for
+     the purposes of getting rid of backtracking and severe performance
+     and memory constraints. Pikevm guarantees that all regular expressions
+     are computed in constant space and O(n+k) time where n is size
+     of the string and k is some constant for the complexity of the
+     regex i.e. number of state transitions. It is important to understand
+     that it does not mean that we run at O(n) linear speed, but
+     rather the amount of processing time & memory usage is distributed
+     evenly and linearly throughout the string, the k constant plays
+     a big role. If you are familiar with radix sort algorithms this
+     follows the same idea.
+     Q: What are the other benefits?
+     A: For example, now it is possible to compute a C comment
+     /* x */ where x can be an infinite number of characters. Of course,
+     this extends to every other valid regular expression.
+     Q: New features pikevm supports?
+     A: Additionally, pikevm supports PCRE style non capture group
+     (?:) and lazy quantifiers like .*? and .+?? because they were
+     easy to implement and allow for further regex profiling/optimization.
+     Q: NFA vs DFA (identify)
+     A: pikevm = NFA backtrack = DFA
+     Q: What's wrong with original implementation?
+     A: Nothing except it being slow and limited. My improved version
+     of Ali's DFA implementation ran 3.5X faster in any case, however
+     I found a bug with it where zero quantifier "?" nested groups
+     compute wrong submatch results. To fix this problem, it would
+     require to undo a lot of optimization work already done, basically
+     going back to how slow Ali's implementation would be. The reason
+     this was spotted so late was because this kind of regex wasn't
+     used before, so I never tested it. Other than that I think submatch
+     extraction is correct on other cases. Pikevm does not have this
+     bug, so it will be used as main regex engine from now on, unless
+     dfa ever finds a proper fix. Honestly, this change isn't so
+     surprising, as I was working on pikevm a few months prior, to
+     favor a superior algorithm.
+
+     You can still find that code here (likely with no updates):
+     https://github.com/kyx0r/nextvi/tree/dfa_dead
+
+     As a downside, NFA simulation loses the DFA property of being
+     able to quickly short circuit a match, as everything runs linearly
+     and at constant speed, incurring match time overhead. Well optimized
+     DFA engine can outperform pikevm, but that is rather rare as
+     they got problems of their own. For example as independently
+     benchmarked, dfa_dead runs only 13% faster than pikevm and that
+     is stretching the limit of what is physically possible on a
+     table based matcher. Can't cheat mother nature, and if you dare
+     to try she's unforgiving at best.
+
+     Supplementary reading by Russ Cox:
+     https://swtch.com/~rsc/regexp/regexp1.html
+
+     Original Neatvi repository:
+     https://github.com/aligrudi/neatvi
+
+     Posix vi(1)
+     https://pubs.opengroup.org/onlinepubs/9699919799/utilities/vi.html
+
+     Posix ex(1)
+     https://pubs.opengroup.org/onlinepubs/9699919799/utilities/ex.html
+
+AUTHORS
+     Nextvi was written by Kyryl Melekhin <k.melekhin@gmail.com>.  It is based
+     on neatvi(1), which was written by Ali Gholami Rudi <ali@rudi.ir>.  This
+     manual page was inspired by nepeta <nepeta@canaglie.net>
+
+Linux 6.13.0-rc1               February 3, 2025               Linux 6.13.0-rc1

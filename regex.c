@@ -52,7 +52,7 @@ static int compilecode(const char *re_loc, rcode *prog, int sizecode, int flg)
 	const char *re = re_loc;
 	int *code = sizecode ? NULL : prog->insts;
 	int start = PC, term = PC;
-	int alt_label = 0, c;
+	int alt_label = 0, c, l, cnt;
 	int alt_stack[4096], altc = 0;
 	int cap_stack[4096 * 5], capc = 0;
 
@@ -71,7 +71,7 @@ static int compilecode(const char *re_loc, rcode *prog, int sizecode, int flg)
 		default:
 			term = PC;
 			EMIT(PC++, CHAR);
-			uc_code(c, re)
+			uc_code(c, re, l)
 			if (flg & REG_ICASE && (unsigned int)c < 128)
 				c = tolower(c);
 			EMIT(PC++, c);
@@ -81,7 +81,6 @@ static int compilecode(const char *re_loc, rcode *prog, int sizecode, int flg)
 			EMIT(PC++, ANY);
 			break;
 		case '[':;
-			int cnt, l;
 			term = PC;
 			re++;
 			EMIT(PC++, CLASS);
@@ -93,8 +92,7 @@ static int compilecode(const char *re_loc, rcode *prog, int sizecode, int flg)
 			for (cnt = 0; *re != ']'; cnt++) {
 				if (*re == '\\') re++;
 				if (!*re) return -1;
-				uc_len(l, re)
-				uc_code(c, re)
+				uc_code(c, re, l)
 				if (re[-1] != '\\' && re[l] != ']' &&
 						(c == '!' || c == '=' || c == '^')) {
 					EMIT(PC-(cnt*2)-1, cnt);
@@ -115,11 +113,11 @@ static int compilecode(const char *re_loc, rcode *prog, int sizecode, int flg)
 				EMIT(PC++, c);
 				if (re[l] == '-' && re[l+1] != ']')
 					re += l+1;
-				uc_code(c, re)
+				uc_code(c, re, l)
+				re += l;
 				if (flg & REG_ICASE && (unsigned int)c < 128)
 					c = tolower(c);
 				EMIT(PC++, c);
-				uc_len(c, re) re += c;
 			}
 			EMIT(PC-(cnt*2)-1, cnt);
 			EMIT(term+1, PC - term - 2);
@@ -251,7 +249,7 @@ static int compilecode(const char *re_loc, rcode *prog, int sizecode, int flg)
 			term = PC;
 			break;
 		}
-		uc_len(c, re) re += c;
+		re += uc_len(re);
 	}
 	if (code && alt_label) {
 		EMIT(alt_label, REL(alt_label, PC) + 1);
@@ -449,8 +447,8 @@ clistidx = nlistidx; \
 
 #define match(n, cpn) \
 for (;; sp = _sp) { \
-	uc_len(i, sp) uc_code(c, sp) cpn \
-	_sp = sp+i;\
+	uc_code(c, sp, i) cpn \
+	_sp = sp+i; \
 	nlistidx = 0, sparsesz = 0; \
 	for (i = 0; i < clistidx; i++) { \
 		npc = clist[i].pc; \
@@ -463,29 +461,35 @@ for (;; sp = _sp) { \
 		} else if (spc == CLASS) { \
 			int *pc = npc; \
 			int gcnt = pc[1]; \
-			int cnt, neq, _cnt; \
+			int cnt, neq; \
 			do { \
 				pc += 2; \
-				const char *s = sp; \
-				int cp = c; \
 				neq = pc[0]; \
 				cnt = pc[1]; \
-				_cnt = cnt; \
-				while (cnt--) { \
-					pc += 2; \
-					if (cp >= *pc && cp <= pc[1]) { \
-						if (neq < -1 || neq > 1) { \
-							uc_len(j, s) s += j; \
-							uc_code(cp, s) \
-							_cnt--; \
-							continue; \
+				if (neq < -1 || neq > 1) { \
+					const char *s = sp; \
+					int cp = c; \
+					for (; cnt > 0; cnt--) { \
+						pc += 2; \
+						if (c >= *pc && c <= pc[1]) { \
+							s += uc_len(s); \
+							uc_code(c, s, j) cpn \
+						} else { \
+							pc += (cnt-1) * 2; \
+							break; \
 						} \
-						_cnt = 0; \
-						break; \
+					} \
+					cnt = !cnt; \
+					c = cp; \
+				} else { \
+					for (; cnt > 0; cnt--) { \
+						pc += 2; \
+						if (c >= *pc && c <= pc[1]) \
+							cnt = -1; \
 					} \
 				} \
-			} while (pc < npc + gcnt && _cnt); \
-			if ((_cnt && neq > 0) || (!_cnt && neq < 0)) \
+			} while (pc < npc + gcnt && !cnt); \
+			if ((!cnt && neq > 0) || (cnt && neq < 0)) \
 				deccont() \
 			npc += gcnt + 2; \
 		} else if (spc == MATCH) { \
@@ -569,56 +573,58 @@ void rset_free(rset *rs)
 
 rset *rset_make(int n, char **re, int flg)
 {
-	rset *rs = malloc(sizeof(*rs));
-	sbuf *sb; sbuf_make(sb, 1024)
-	rs->grp = malloc((n + 1) * sizeof(rs->grp[0]));
-	rs->setgrpcnt = malloc((n + 1) * sizeof(rs->setgrpcnt[0]));
-	rs->grpcnt = 2;
+	int i, c = 0;
+	rset *rs = emalloc(sizeof(*rs));
+	sbuf_smake(sb, 1024)
+	rs->grp = emalloc((n + 1) * sizeof(rs->grp[0]));
+	rs->setgrpcnt = emalloc((n + 1) * sizeof(rs->setgrpcnt[0]));
 	rs->n = n;
-	sbuf_chr(sb, '(')
-	for (int i = 0; i < n; i++) {
+	for (i = 0; i < n; i++)
+		if (!re[i])
+			c++;
+	rs->grpcnt = (n - c) > 1;
+	for (i = 0; i < n; i++) {
 		if (!re[i]) {
 			rs->grp[i] = -1;
 			continue;
 		}
-		if (sb->s_n > 1)
+		if (sb->s_n > 0)
 			sbuf_chr(sb, '|')
-		sbuf_chr(sb, '(')
+		if ((n - c) > 1)
+			sbuf_chr(sb, '(')
 		sbuf_str(sb, re[i])
-		sbuf_chr(sb, ')')
+		if ((n - c) > 1)
+			sbuf_chr(sb, ')')
 		rs->grp[i] = rs->grpcnt;
-		rs->setgrpcnt[i] = re_groupcount(re[i]);
-		rs->grpcnt += 1 + rs->setgrpcnt[i];
+		rs->setgrpcnt[i] = re_groupcount(re[i]) + 1;
+		rs->grpcnt += rs->setgrpcnt[i];
 	}
-	rs->grp[n] = rs->grpcnt;
-	sbuf_mem(sb, ")\0\0\0\0", 5)
+	sbuf_mem(sb, "\0\0\0\0", 4)
 	int sz = re_sizecode(sb->s) * sizeof(int);
-	char *code = malloc(sizeof(rcode)+abs(sz));
+	char *code = emalloc(sizeof(rcode)+abs(sz));
 	rs->regex = (rcode*)code;
-	if (sz < 0 || reg_comp((rcode*)code, sb->s, rs->grpcnt-1, flg)) {
+	if (sz < 0 || reg_comp((rcode*)code, sb->s,
+				MAX(rs->grpcnt-1, 0), flg)) {
 		rset_free(rs);
 		rs = NULL;
 	}
-	sbuf_free(sb)
+	free(sb->s);
 	return rs;
 }
 
 /* return the index of the matching regular expression or -1 if none matches */
-int rset_find(rset *rs, char *s, int n, int *grps, int flg)
+int rset_find(rset *rs, char *s, int *grps, int flg)
 {
 	regmatch_t subs[rs->grpcnt+1];
 	regmatch_t *sub = subs+1;
-	if (re_pikevm(rs->regex, s, (const char**)sub, rs->grpcnt * 2, flg))
-	{
+	if (re_pikevm(rs->regex, s, (const char**)sub, rs->grpcnt * 2, flg)) {
 		subs[0].rm_eo = NULL; /* make sure sub[-1] never matches */
 		for (int i = rs->n-1; i >= 0; i--) {
-			if (sub[rs->grp[i]].rm_eo)
-			{
-				int grp, sgrp = rs->setgrpcnt[i] + 1;
+			if (sub[rs->grp[i]].rm_eo) {
+				int grp, n = grps ? rs->setgrpcnt[i] : 0;
 				for (int gi = 0; gi < n; gi++) {
 					grp = rs->grp[i] + gi;
-					if (gi < sgrp && sub[grp].rm_eo
-							&& sub[grp].rm_so) {
+					if (sub[grp].rm_eo && sub[grp].rm_so) {
 						grps[gi * 2] = sub[grp].rm_so - s;
 						grps[gi * 2 + 1] = sub[grp].rm_eo - s;
 					} else {
@@ -640,7 +646,7 @@ char *re_read(char **src)
 	int delim = (unsigned char) *s++;
 	if (!delim)
 		return NULL;
-	sbuf *sb; sbuf_make(sb, 256)
+	sbuf_smake(sb, 256)
 	while (*s && *s != delim) {
 		if (s[0] == '\\' && s[1])
 			if (*(++s) != delim)
@@ -648,5 +654,5 @@ char *re_read(char **src)
 		sbuf_chr(sb, (unsigned char) *s++)
 	}
 	*src = *s ? s + 1 : s;
-	sbufn_done(sb)
+	sbufn_sret(sb)
 }

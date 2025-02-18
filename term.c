@@ -1,19 +1,21 @@
+static struct termios termios;
 sbuf *term_sbuf;
 int term_record;
 int xrows, xcols;
-static struct termios termios;
+unsigned int ibuf_pos, ibuf_cnt, ibuf_sz = 128, icmd_pos;
+unsigned char *ibuf, icmd[4096];
+unsigned int texec, tn;
 
 void term_init(void)
 {
-	if (xvis & 2 && xvis & 4)
+	if (xvis & 2)
 		return;
 	struct winsize win;
 	struct termios newtermios;
-	sbufn_make(term_sbuf, 2048)
+	sbuf_make(term_sbuf, 2048)
 	tcgetattr(0, &termios);
 	newtermios = termios;
-	newtermios.c_lflag &= ~(ICANON | ISIG);
-	newtermios.c_lflag &= ~ECHO;
+	newtermios.c_lflag &= ~(ICANON | ISIG | ECHO);
 	tcsetattr(0, TCSAFLUSH, &newtermios);
 	if (getenv("LINES"))
 		xrows = atoi(getenv("LINES"));
@@ -25,12 +27,11 @@ void term_init(void)
 	}
 	xcols = xcols ? xcols : 80;
 	xrows = xrows ? xrows : 25;
-	term_out("\33[m");
 }
 
 void term_done(void)
 {
-	if (!term_sbuf)
+	if (xvis & 2)
 		return;
 	term_commit();
 	sbuf_free(term_sbuf)
@@ -39,8 +40,8 @@ void term_done(void)
 
 void term_clean(void)
 {
-	write(1, "\x1b[2J", 4);	/* clear screen */
-	write(1, "\x1b[H", 3);	/* cursor topleft */
+	term_write("\x1b[2J", 4)	/* clear screen */
+	term_write("\x1b[H", 3)		/* cursor topleft */
 }
 
 void term_suspend(void)
@@ -52,17 +53,17 @@ void term_suspend(void)
 
 void term_commit(void)
 {
-	write(1, term_sbuf->s, term_sbuf->s_n);
+	term_write(term_sbuf->s, term_sbuf->s_n)
 	sbuf_cut(term_sbuf, 0)
 	term_record = 0;
 }
 
-void term_out(char *s)
+static void term_out(char *s)
 {
 	if (term_record)
 		sbufn_str(term_sbuf, s)
 	else
-		write(1, s, strlen(s));
+		term_write(s, strlen(s))
 }
 
 void term_chr(int ch)
@@ -78,68 +79,90 @@ void term_kill(void)
 
 void term_room(int n)
 {
-	char cmd[16];
-	if (n < 0)
-		sprintf(cmd, "\33[%dM", -n);
-	else if (n > 0)
-		sprintf(cmd, "\33[%dL", n);
-	if (n)
-		term_out(cmd);
+	char cmd[64] = "\33[";
+	if (!n)
+		return;
+	char *s = itoa(abs(n), cmd+2);
+	s[0] = n < 0 ? 'M' : 'L';
+	s[1] = '\0';
+	term_out(cmd);
 }
 
 void term_pos(int r, int c)
 {
-	char buf[32];
-	if (c < 0)
-		c = 0;
-	else if (c >= xcols)
-		c = xcols - 1;
-	if (r < 0)
-		sprintf(buf, "\r\33[%d%c", abs(c), c > 0 ? 'C' : 'D');
-	else
-		sprintf(buf, "\33[%d;%dH", r + 1, c + 1);
-	term_out(buf);
+	char buf[64] = "\r\33[", *s;
+	if (r < 0) {
+		memcpy(itoa(MAX(0, c), buf+3), c > 0 ? "C" : "D", 2);
+		term_out(buf);
+	} else {
+		s = itoa(r + 1, buf+3);
+		if (c > 0) {
+			*s++ = ';';
+			s = itoa(c + 1, s);
+		}
+		memcpy(s, "H", 2);
+		term_out(buf+1);
+	}
 }
-
-static char ibuf[4096];			/* input character buffer */
-static char icmd[4096];			/* read after the last term_cmd() */
-unsigned int ibuf_pos, ibuf_cnt;	/* ibuf[] position and length */
-unsigned int icmd_pos;			/* icmd[] position */
 
 /* read s before reading from the terminal */
 void term_push(char *s, unsigned int n)
 {
-	n = MIN(n, sizeof(ibuf) - ibuf_cnt);
-	memcpy(ibuf + ibuf_cnt, s, n);
+	static unsigned int tibuf_pos, tibuf_cnt;
+	if (texec == '@' && xquit > 0) {
+		xquit = 0;
+		tn = 0;
+		ibuf_cnt = tibuf_cnt;
+		ibuf_pos = tibuf_cnt;
+	}
+	if (ibuf_cnt + n >= ibuf_sz || ibuf_sz - ibuf_cnt + n > 128) {
+		ibuf_sz = ibuf_cnt + n + 128;
+		ibuf = erealloc(ibuf, ibuf_sz);
+	}
+	if (texec) {
+		if (tibuf_pos != ibuf_pos)
+			tn = 0;
+		memmove(ibuf + ibuf_pos + n + tn,
+			ibuf + ibuf_pos + tn, ibuf_cnt - ibuf_pos - tn);
+		memcpy(ibuf + ibuf_pos + tn, s, n);
+		tn += n;
+		tibuf_pos = ibuf_pos;
+	} else
+		memcpy(ibuf + ibuf_cnt, s, n);
+	tibuf_cnt = ibuf_cnt;
 	ibuf_cnt += n;
 }
 
-/* return a static buffer containing inputs read since the last term_cmd() */
-char *term_cmd(int *n)
+void term_back(int c)
 {
-	*n = icmd_pos;
-	icmd_pos = 0;
-	return icmd;
+	char s[1] = {c};
+	term_push(s, 1);
 }
 
 int term_read(void)
 {
 	struct pollfd ufds[1];
-	int n;
 	if (ibuf_pos >= ibuf_cnt) {
+		if (texec) {
+			xquit = !xquit ? 1 : xquit;
+			if (texec == '&')
+				goto err;
+		}
 		ufds[0].fd = STDIN_FILENO;
 		ufds[0].events = POLLIN;
-		if (poll(ufds, 1, -1) <= 0)
-			return -1;
 		/* read a single input character */
-		if ((n = read(STDIN_FILENO, ibuf, 1)) <= 0)
-			return -1;
-		ibuf_cnt = n;
+		if (xquit < 0 || poll(ufds, 1, -1) <= 0 ||
+				read(STDIN_FILENO, ibuf, 1) <= 0) {
+			xquit = !isatty(STDIN_FILENO) ? -1 : xquit;
+			err:
+			*ibuf = 0;
+		}
+		ibuf_cnt = 1;
 		ibuf_pos = 0;
 	}
 	if (icmd_pos < sizeof(icmd))
-		icmd[icmd_pos++] = (unsigned char)ibuf[ibuf_pos];
-	return (unsigned char)ibuf[ibuf_pos++];
+		icmd[icmd_pos++] = ibuf[ibuf_pos];
+	return ibuf[ibuf_pos++];
 }
 
 /* return a static string that changes text attributes to att */
@@ -179,8 +202,8 @@ char *term_att(int att)
 static int cmd_make(char **argv, int *ifd, int *ofd)
 {
 	int pid;
-	int pipefds0[2];
-	int pipefds1[2];
+	int pipefds0[2] = {-1, -1};
+	int pipefds1[2] = {-1, -1};
 	if (ifd)
 		pipe(pipefds0);
 	if (ofd)
@@ -229,7 +252,7 @@ char *xgetenv(char **q)
 			r = getenv(*q+1);
 		else
 			return *q;
-		q += 1;
+		q++;
 	}
 	return r;
 }
@@ -239,7 +262,6 @@ char *cmd_pipe(char *cmd, char *ibuf, int oproc)
 {
 	static char *sh[] = {"$SHELL", "sh", NULL};
 	struct pollfd fds[3];
-	sbuf *sb = NULL; /* initialize, bogus gcc12 warn */
 	char buf[512];
 	int ifd = -1, ofd = -1;
 	int slen = ibuf ? strlen(ibuf) : 0;
@@ -253,13 +275,12 @@ char *cmd_pipe(char *cmd, char *ibuf, int oproc)
 	int pid = cmd_make(argv+!xish, ibuf ? &ifd : NULL, oproc ? &ofd : NULL);
 	if (pid <= 0)
 		return NULL;
-	if (oproc)
-		sbuf_make(sb, 64)
+	sbuf_smake(sb, sizeof(buf))
 	if (!ibuf) {
 		signal(SIGINT, SIG_IGN);
 		term_done();
-	}
-	fcntl(ifd, F_SETFL, fcntl(ifd, F_GETFL, 0) | O_NONBLOCK);
+	} else if (ifd >= 0)
+		fcntl(ifd, F_SETFL, fcntl(ifd, F_GETFL, 0) | O_NONBLOCK);
 	fds[0].fd = ofd;
 	fds[0].events = POLLIN;
 	fds[1].fd = ifd;
@@ -270,7 +291,7 @@ char *cmd_pipe(char *cmd, char *ibuf, int oproc)
 		if (fds[0].revents & POLLIN) {
 			int ret = read(fds[0].fd, buf, sizeof(buf));
 			if (ret > 0 && oproc == 2)
-				write(1, buf, ret);
+				term_write(buf, ret)
 			if (ret > 0)
 				sbuf_mem(sb, buf, ret)
 			else {
@@ -314,12 +335,7 @@ char *cmd_pipe(char *cmd, char *ibuf, int oproc)
 		signal(SIGINT, SIG_DFL);
 	}
 	if (oproc)
-		sbufn_done(sb)
+		sbufn_sret(sb)
+	free(sb->s);
 	return NULL;
-}
-
-int cmd_exec(char *cmd)
-{
-	cmd_pipe(cmd, NULL, 0);
-	return 0;
 }
