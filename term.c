@@ -1,14 +1,36 @@
-static struct termios termios;
-struct pollfd term_ufd = {STDIN_FILENO, POLLIN};
-sbuf *term_sbuf;
-int term_record;
-int term_winch;
-int term_resized;
-int xrows, xcols;
+/**
+ * @file term.c
+ * @brief Terminal layer: raw mode and window size, buffered output and
+ * escape sequences, the input queue (keys pushed by macros, mappings and
+ * term_exec are read before the terminal), and running shell commands
+ * through pipes.
+ */
+static struct termios termios;	///< original terminal attributes, restored by term_done()
+struct pollfd term_ufd = {STDIN_FILENO, POLLIN};	///< input (stdin) descriptor for poll()
+sbuf *term_sbuf;	///< output buffer; NULL until the first term_init() (term_done() frees it but does not reset it)
+int term_record;	///< if set, output goes to term_sbuf until term_commit()
+int term_winch;	///< SIGWINCH count; reset by term_init()
+int term_resized;	///< incremented by every term_init(); vi.c compares it to vi_status to take the status row out of xrows again
+int xrows, xcols;	///< terminal size in rows/columns: TIOCGWINSZ, else $LINES/$COLUMNS, default 25x80 (vi.c subtracts the status row from xrows)
+/* tibuf_pos: index of the next byte to read from tibuf;
+ * tibuf_cnt: number of valid bytes in tibuf;
+ * tibuf_sz: allocated size of tibuf (term_push() resizes it);
+ * ticmd_pos: number of bytes in ticmd. */
 unsigned int tibuf_pos, tibuf_cnt, tibuf_sz = 128, ticmd_pos;
+/* tibuf: pending input queue (pushed keys, or the last byte read from the
+ *        terminal); term_read() returns from it first.
+ * ticmd: every byte returned by term_read() since vi.c last reset
+ *        ticmd_pos (once per normal-mode command); saved for '.' repeat. */
 unsigned char *tibuf, ticmd[4096];
+/* texec: type of the running term_exec() ('@' macro or '&' ex), 0 if none;
+ *        when its input runs out, term_read() sets quit_state to leave the
+ *        nested vi() ('&' also returns 0 instead of reading the terminal).
+ * texec_n: bytes term_push() inserted at the read position during
+ *        term_exec(); later pushes go after them, so they are read in push
+ *        order before the rest of the queue. */
 unsigned int texec, texec_n;
 
+/** @brief Enter raw mode (no ICANON, ISIG, ECHO) and read the terminal size. */
 void term_init(void)
 {
 	struct winsize win;
@@ -34,6 +56,7 @@ void term_init(void)
 	xrows = xrows ? xrows : 25;
 }
 
+/** @brief Flush output, free term_sbuf and restore the terminal attributes. */
 void term_done(void)
 {
 	if (!term_sbuf)
@@ -43,12 +66,14 @@ void term_done(void)
 	tcsetattr(term_ufd.fd, 0, &termios);
 }
 
+/** @brief Clear the screen and home the cursor. */
 void term_clean(void)
 {
 	term_write("\x1b[2J", 4)	/* clear screen */
 	term_write("\x1b[H", 3)		/* cursor topleft */
 }
 
+/** @brief Restore the terminal and stop the process (^z); reinit on resume. */
 void term_suspend(void)
 {
 	if (opt_startup_flags & 8)
@@ -60,6 +85,7 @@ void term_suspend(void)
 		term_scrh()
 }
 
+/** @brief Write out term_sbuf and stop recording. */
 void term_commit(void)
 {
 	term_write(term_sbuf->s, term_sbuf->s_n)
@@ -67,6 +93,7 @@ void term_commit(void)
 	term_record = 0;
 }
 
+/** @brief Output s, buffered if term_record. */
 static void term_out(char *s)
 {
 	if (term_record)
@@ -75,17 +102,20 @@ static void term_out(char *s)
 		term_write(s, strlen(s))
 }
 
+/** @brief Output one byte. */
 void term_chr(int ch)
 {
 	char s[4] = {ch};
 	term_out(s);
 }
 
+/** @brief Clear to the end of the line. */
 void term_kill(void)
 {
 	term_out("\33[K");
 }
 
+/** @brief Insert n lines at the cursor row (n > 0) or delete -n lines (n < 0). */
 void term_room(int n)
 {
 	char cmd[64] = "\33[";
@@ -97,6 +127,10 @@ void term_room(int n)
 	term_out(cmd);
 }
 
+/**
+ * @brief Move the cursor to row r, column c (0-based).
+ * If r < 0, move to column c of the current row (CR then c right).
+ */
 void term_pos(int r, int c)
 {
 	char buf[64] = "\r\33[", *s;
@@ -114,10 +148,15 @@ void term_pos(int r, int c)
 	}
 }
 
-/* read s before reading from the terminal */
+/**
+ * @brief Queue n bytes of s to be read before reading from the terminal.
+ * Appended to the queue normally; inside term_exec() inserted at the read
+ * position (after earlier pushes of the same position, see texec_n).
+ */
 void term_push(char *s, unsigned int n)
 {
-	static unsigned int tibuf_prev;
+	static unsigned int tibuf_prev;	///< tibuf_pos at the previous push during term_exec(); if it moved, texec_n restarts
+	/* grow if full, shrink if more than 128 bytes would be spare */
 	if (tibuf_cnt + n >= tibuf_sz || tibuf_sz - (tibuf_cnt + n) > 128) {
 		tibuf_sz = tibuf_cnt + n + 128;
 		tibuf = erealloc(tibuf, tibuf_sz);
@@ -128,6 +167,7 @@ void term_push(char *s, unsigned int n)
 			texec_n = 0;
 		} else if (tibuf_prev != tibuf_pos)
 			texec_n = 0;
+		/* open an n byte gap after the texec_n bytes already pushed here */
 		memmove(tibuf + tibuf_pos + n + texec_n,
 			tibuf + tibuf_pos + texec_n,
 			tibuf_cnt - tibuf_pos - texec_n);
@@ -139,6 +179,13 @@ void term_push(char *s, unsigned int n)
 	tibuf_cnt += n;
 }
 
+/**
+ * @brief Return the next input byte: from tibuf, else from the terminal.
+ * @param winch  if nonzero, returned as the key when the window was resized
+ * @return the byte, or 0 on EOF/error (or when a '&' term_exec runs out)
+ * Terminal bytes are also appended to register opt_record_reg if set; every
+ * returned byte is logged in ticmd.
+ */
 int term_read(int winch)
 {
 	int cw;
@@ -181,7 +228,7 @@ int term_read(int winch)
 	return tibuf[tibuf_pos++];
 }
 
-/* return a static string that changes text attributes to att */
+/** @brief Return a static SGR escape string that sets text attributes att. */
 char *term_att(int att)
 {
 	if (att & SYN_MK)
@@ -215,6 +262,11 @@ char *term_att(int att)
 	return buf;
 }
 
+/**
+ * @brief Fork and exec argv; if ifd/ofd, connect its stdin/stdout+stderr to
+ * pipes and return our ends in them.
+ * @return child pid or -1
+ */
 static int cmd_make(char **argv, int *ifd, int *ofd)
 {
 	int pid;
@@ -257,6 +309,10 @@ static int cmd_make(char **argv, int *ifd, int *ofd)
 	return pid;
 }
 
+/**
+ * @brief Return the first usable entry of the NULL-terminated list q: "$VAR"
+ * entries are looked up in the environment, others are returned as is.
+ */
 char *xgetenv(char **q)
 {
 	char *r = NULL;
@@ -270,7 +326,16 @@ char *xgetenv(char **q)
 	return r;
 }
 
-/* execute a command; pass in input if ibuf and process output if oproc */
+/**
+ * @brief Run cmd with $SHELL -c (or sh); pass in input if ibuf and process output if oproc.
+ * @param cmd     command line passed to the shell
+ * @param ibuf    written to the command's stdin; while it runs ^c on the
+ *                terminal sends SIGINT. If NULL the command gets the
+ *                terminal (term_done() before, term_init() after).
+ * @param oproc   1: collect stdout+stderr; 2: also echo it to the terminal
+ * @param status  if not NULL, receives the waitpid() status
+ * @return the collected output (empty if !oproc), NULL if fork fails
+ */
 sbuf *cmd_pipe(char *cmd, sbuf *ibuf, int oproc, int *status)
 {
 	static char *sh[] = {"$SHELL", "sh", NULL};
