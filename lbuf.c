@@ -162,7 +162,7 @@ void lbuf_emark(struct lbuf *lb, struct lopt *lo, int end, int o2)
 	lbuf_copymark(lo->mark_se, lb->mark_se)
 	lb->mark_se[0] = end;
 	lb->mark_se[1] = o2;
-	if (xseq < 0)
+	if (opt_undo_seq < 0)
 		lopt_done(lo);
 }
 
@@ -171,7 +171,7 @@ struct lopt *lbuf_opt(struct lbuf *lb, int beg, int o1, int n_del)
 {
 	struct lopt *lo;
 	static struct lopt slo;
-	if (xseq < 0)
+	if (opt_undo_seq < 0)
 		lo = &slo;
 	else {
 		for (int i = lb->hist_u; i < lb->hist_n; i++)
@@ -223,7 +223,7 @@ void lbuf_edit(struct lbuf *lb, char *buf, int beg, int end, int o1, int o2)
 	lb->modified = 1;
 	if (lb->saved > lb->hist_u)
 		lb->saved = -1;
-	if (xseq < 0 || !lo->n_ins)
+	if (opt_undo_seq < 0 || !lo->n_ins)
 		free(sb->s);
 	else
 		lo->ins = (char**)sb->s;
@@ -518,7 +518,7 @@ int lbuf_search(struct lbuf *lb, rset *re, int dir, int beg, int end, int pskip,
 		s = lb->ln[i];
 		while (rset_find(re, s + off, offs, flg) >= 0) {
 			flg |= REG_NOTBOL;
-			g1 = offs[xgrp], g2 = offs[xgrp + 1];
+			g1 = offs[opt_search_group], g2 = offs[opt_search_group + 1];
 			if (g1 < 0) {
 				off += offs[1] > 0 ? offs[1] : uc_len(s + off);
 				continue;

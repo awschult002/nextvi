@@ -322,7 +322,7 @@ extern int xrows, xcols;
 extern unsigned int tibuf_pos, tibuf_cnt, tibuf_sz, ticmd_pos;
 extern unsigned char *tibuf, ticmd[4096];
 extern unsigned int texec, texec_n;
-#define term_write(s, n) if (xled) write(1, s, n);
+#define term_write(s, n) if (opt_line_editor) write(1, s, n);
 void term_init(void);
 void term_done(void);
 void term_clean(void);
@@ -347,8 +347,8 @@ void term_push(char *s, unsigned int n);
 	preserve(int, texec, texec = type;) \
 	vi(0); \
 	restore(texec) \
-	if (xquit > 0) \
-		xquit = 0; \
+	if (quit_state > 0) \
+		quit_state = 0; \
 	restore(tibuf_pos) \
 	restore(tibuf_cnt) \
 	restore(texec_n) \
@@ -401,7 +401,7 @@ typedef struct {
 } ins_state;
 #define ins_init(is) \
 is.t_row = -2; \
-is.p_reg = xdefreg; \
+is.p_reg = default_reg; \
 is.lsug = 0; \
 is.sug_pt = -1; \
 is.sug = NULL; \
@@ -437,70 +437,70 @@ struct buf {
 	signed char td;			/* text direction */
 };
 /* ex options */
-extern int xleft;
-extern int xvis;
-extern int xai;
-extern int xic;
-extern int xhl;
-extern int xhll;
-extern int xhlw;
-extern int xhlp;
-extern int xhlr;
-extern int xled;
-extern int xtd;
-extern int xshape;
-extern int xorder;
-extern int xts;
-extern int xish;
-extern int xgrp;
-extern int xpac;
-extern int xmpt;
-extern int xpr;
-extern int xlim;
-extern int xseq;
-extern int xerr;
-extern int xfr;
-extern int xrr;
+extern int opt_left_col;
+extern int opt_startup_flags;
+extern int opt_autoindent;
+extern int opt_ignorecase;
+extern int opt_syntax_hl;
+extern int opt_hl_line;
+extern int opt_hl_word;
+extern int opt_hl_pair;
+extern int opt_hl_reverse;
+extern int opt_line_editor;
+extern int opt_text_dir;
+extern int opt_shaping;
+extern int opt_reorder;
+extern int opt_tabstop;
+extern int opt_interactive_shell;
+extern int opt_search_group;
+extern int opt_print_autocomplete;
+extern int opt_multiline_prompt;
+extern int opt_print_reg;
+extern int opt_render_limit;
+extern int opt_undo_seq;
+extern int opt_error_mode;
+extern int opt_find_reg;
+extern int opt_record_reg;
 /* global variables */
-extern int xquit;
-extern int xrow, xoff, xtop;
-extern int xbufcur;
-extern int xgrec;
-extern int xkmap;
-extern int xkmap_alt;
-extern int xkwddir;
-extern int xkwdcnt;
-extern int xpln;
-extern int xsep;
-extern int xesc;
-extern int xexec_dep;
-extern sbuf *xacreg;
-extern rset *xkwdrs;
-extern sbuf **xregs;
-extern int xregs_n;
-extern int xdefreg;
+extern int quit_state;
+extern int cursor_row, cursor_off, view_top_row;
+extern int buf_count;
+extern int vi_ex_depth;
+extern int cur_keymap;
+extern int keymap_alt;
+extern int search_dir;
+extern int search_changes;
+extern int print_newline;
+extern int ex_separator;
+extern int ex_escape;
+extern int ex_exec_depth;
+extern sbuf *autocomplete_filter;
+extern rset *search_rset;
+extern sbuf **str_registers;
+extern int str_registers_n;
+extern int default_reg;
 extern struct buf *bufs;
 extern struct buf tempbufs[3];
-extern struct buf *ex_buf;
-extern struct buf *ex_pbuf;
+extern struct buf *cur_buf;
+extern struct buf *prev_buf;
 #define istempbuf(buf) (buf >= tempbufs && buf < tempbufs + LEN(tempbufs))
-#define xb_path ex_buf->path
-#define xb_ft ex_buf->ft
-#define xb ex_buf->lb
+#define xb_path cur_buf->path
+#define xb_ft cur_buf->ft
+#define xb cur_buf->lb
 #define exbuf_load(buf) \
-	xrow = buf->row; \
-	xoff = buf->off; \
-	xtop = buf->top; \
-	xtd = buf->td; \
+	cursor_row = buf->row; \
+	cursor_off = buf->off; \
+	view_top_row = buf->top; \
+	opt_text_dir = buf->td; \
 
 #define exbuf_save(buf) \
-	buf->row = xrow; \
-	buf->off = xoff; \
-	buf->top = xtop; \
-	buf->td = xtd; \
+	buf->row = cursor_row; \
+	buf->off = cursor_off; \
+	buf->top = view_top_row; \
+	buf->td = opt_text_dir; \
 
 #define bufs_switchwft(idx) \
-{ if (&bufs[idx] != ex_buf) { bufs_switch(idx); syn_setft(xb_ft); } } \
+{ if (&bufs[idx] != cur_buf) { bufs_switch(idx); syn_setft(xb_ft); } } \
 
 void bufs_switch(int idx);
 void temp_open(int i, char *name, char *ft);

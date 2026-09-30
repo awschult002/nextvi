@@ -51,12 +51,12 @@ void term_clean(void)
 
 void term_suspend(void)
 {
-	if (xvis & 8)
+	if (opt_startup_flags & 8)
 		term_scrl()
 	term_done();
 	kill(0, SIGSTOP);
 	term_init();
-	if (xvis & 8)
+	if (opt_startup_flags & 8)
 		term_scrh()
 }
 
@@ -123,8 +123,8 @@ void term_push(char *s, unsigned int n)
 		tibuf = erealloc(tibuf, tibuf_sz);
 	}
 	if (texec) {
-		if (texec == '@' && xquit > 0) {
-			xquit = 0;
+		if (texec == '@' && quit_state > 0) {
+			quit_state = 0;
 			texec_n = 0;
 		} else if (tibuf_prev != tibuf_pos)
 			texec_n = 0;
@@ -144,7 +144,7 @@ int term_read(int winch)
 	int cw;
 	if (tibuf_pos >= tibuf_cnt) {
 		if (texec) {
-			xquit = !xquit ? 1 : xquit;
+			quit_state = !quit_state ? 1 : quit_state;
 			if (texec == '&')
 				goto err;
 		}
@@ -155,22 +155,22 @@ int term_read(int winch)
 		cw = 0;
 		re:
 		/* read a single input character */
-		if (xquit < 0 || poll(&term_ufd, 1, -1) <= 0 ||
+		if (quit_state < 0 || poll(&term_ufd, 1, -1) <= 0 ||
 				read(term_ufd.fd, tibuf, 1) <= 0) {
-			xquit = !isatty(term_ufd.fd) ? -1 : xquit;
-			if (term_winch && winch && xquit >= 0) {
+			quit_state = !isatty(term_ufd.fd) ? -1 : quit_state;
+			if (term_winch && winch && quit_state >= 0) {
 				*tibuf = winch;
 				goto ret;
-			} else if (term_winch != cw && !winch && xquit >= 0) {
+			} else if (term_winch != cw && !winch && quit_state >= 0) {
 				cw = term_winch;
 				goto re;
 			}
 			err:
 			*tibuf = 0;
-		} else if (xrr > 0) {
+		} else if (opt_record_reg > 0) {
 			static char buf[2];
 			buf[0] = *tibuf;
-			ex_regput(xrr, buf, 1);
+			ex_regput(opt_record_reg, buf, 1);
 		}
 		ret:
 		tibuf_cnt = 1;
@@ -280,11 +280,11 @@ sbuf *cmd_pipe(char *cmd, sbuf *ibuf, int oproc, int *status)
 	int nw = 0;
 	char *argv[5];
 	argv[0] = xgetenv(sh);
-	argv[1] = xish ? "-i" : argv[0];
+	argv[1] = opt_interactive_shell ? "-i" : argv[0];
 	argv[2] = "-c";
 	argv[3] = cmd;
 	argv[4] = NULL;
-	int pid = cmd_make(argv+!xish, ibuf ? &ifd : NULL, oproc ? &ofd : NULL);
+	int pid = cmd_make(argv+!opt_interactive_shell, ibuf ? &ifd : NULL, oproc ? &ofd : NULL);
 	if (pid <= 0)
 		return NULL;
 	sbuf *sb;

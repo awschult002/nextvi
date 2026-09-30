@@ -45,14 +45,14 @@ static int dir_reorder(char *s, char *se, int *ord, int end, int dir)
 int dir_context(char *s)
 {
 	int found;
-	if (xtd > +1)
+	if (opt_text_dir > +1)
 		return +1;
-	if (xtd < -1)
+	if (opt_text_dir < -1)
 		return -1;
 	if (dir_rsctx && s)
 		if ((found = rset_find(dir_rsctx, s, NULL, 0)) >= 0)
 			return dctxs[found].dir;
-	return xtd < 0 ? -1 : +1;
+	return opt_text_dir < 0 ? -1 : +1;
 }
 
 void dir_init(void)
@@ -75,7 +75,7 @@ void dir_init(void)
 static int ren_cwid(char *s, int pos)
 {
 	if (s[0] == '\t')
-		return xts ? xts - (pos % xts) : 0;
+		return opt_tabstop ? opt_tabstop - (pos % opt_tabstop) : 0;
 	if (s[0] == '\n')
 		return 1;
 	int c, l; uc_code(c, s, l)
@@ -103,8 +103,8 @@ ren_state *ren_position(char *s)
 	rstate->ctx = dir_context(s);
 	unsigned int n, max, l;
 	char *ss = s;
-	if (xlim >= 0 && rstate == rstates+1) {
-		max = (unsigned int)xlim;
+	if (opt_render_limit >= 0 && rstate == rstates+1) {
+		max = (unsigned int)opt_render_limit;
 		for (n = 0; n < max && (l = uc_len(ss)); n++)
 			ss += l;
 		rstate->holelen = uc_len(ss);
@@ -118,7 +118,7 @@ ren_state *ren_position(char *s)
 	int *pos = emalloc((b * 2 * sizeof(pos[0])) + b * sizeof(char*));
 	int *off = &pos[b];
 	char **chrs = (char**)&off[b];
-	if (xorder && dir_reorder(s, ss, off, n, rstate->ctx)) {
+	if (opt_reorder && dir_reorder(s, ss, off, n, rstate->ctx)) {
 		for (i = 0; i < b; i++) {
 			chrs[i] = s;
 			s += uc_len(s);
@@ -233,7 +233,7 @@ char *ren_translate(char *s, char *ln)
 	}
 	if (uc_isbell(c))
 		return "�";
-	return xshape ? uc_shape(ln, s, c) : NULL;
+	return opt_shaping ? uc_shape(ln, s, c) : NULL;
 }
 
 /* mapping filetypes to regular expression sets */

@@ -38,11 +38,11 @@ static int search(const char *pattern, int l)
 static void file_index(struct lbuf *buf)
 {
 	char reg[] = "[^\t !-/:-@[-\\]^`{-\x7f]+";
-	int len, sidx, grp = xgrp;
+	int len, sidx, grp = opt_search_group;
 	char **ss = buf->ln;
 	int ln_n = lbuf_len(buf), n;
-	rset *rs = rset_smake(xacreg ? xacreg->s : reg,
-		xic ? REG_ICASE | REG_NEWLINE : REG_NEWLINE);
+	rset *rs = rset_smake(autocomplete_filter ? autocomplete_filter->s : reg,
+		opt_ignorecase ? REG_ICASE | REG_NEWLINE : REG_NEWLINE);
 	if (!rs || grp >= rs->nsubc) {
 		rset_free(rs);
 		return;
@@ -94,8 +94,8 @@ static char *kmap_map(int kmap, int c)
 int led_pos(char *s, int pos)
 {
 	if (dir_context(s) < 0)
-		return xleft + xcols - pos - 1;
-	return pos - xleft;
+		return opt_left_col + xcols - pos - 1;
+	return pos - opt_left_col;
 }
 
 /* map a character offset in x->s0 to its x->att index; -1 if not visible */
@@ -243,7 +243,7 @@ for (i = 0; i < cterm;) { \
 /* render and highlight a line */
 void led_render(char *s0, int cbeg, int cend)
 {
-	if (!xled)
+	if (!opt_line_editor)
 		return;
 	ren_state *r = ren_position(s0);
 	int j, c, l, i, o, n = r->n;
@@ -303,9 +303,9 @@ void led_render(char *s0, int cbeg, int cend)
 		bound = bsb->s;
 	}
 	memset(att, 0, MIN(n, cterm+1) * sizeof(att[0]));
-	if (xhl == 1)
+	if (opt_syntax_hl == 1)
 		syn_highlight(att, bound ? bound : s0, MIN(n, cterm));
-	if (extsb && extsb->s_n && xhl > 0) {
+	if (extsb && extsb->s_n && opt_syntax_hl > 0) {
 		led_ctx x;
 		x.att = att;
 		x.alen = bound ? c : MIN(n, cterm);
@@ -358,12 +358,12 @@ static int led_lastword(char *s)
 static void led_printparts(sbuf *sb, int pre, int ps,
 	char *post, int postn, int *poff)
 {
-	if (!xled) {
+	if (!opt_line_editor) {
 		sbuf_nul4(sb)
 		return;
 	}
 	int dir, off, pos, psn = sb->s_n;
-	int lncol = poff == &xoff ? vi_lncol : 0;
+	int lncol = poff == &cursor_off ? vi_lncol : 0;
 	sbuf_str(sb, post)
 	sbuf_nul4(sb)
 	/* XXX: O(n) insertion; recursive array data structure cannot be optimized.
@@ -381,10 +381,10 @@ static void led_printparts(sbuf *sb, int pre, int ps,
 			pos = ren_cursor(r->s, r->pos[off-two]);
 		pos += dir < 0 ? -1 : 1;
 	}
-	if (pos >= xleft + xcols || pos < xleft)
-		xleft = pos < xcols ? 0 : pos - xcols / 2;
+	if (pos >= opt_left_col + xcols || pos < opt_left_col)
+		opt_left_col = pos < xcols ? 0 : pos - xcols / 2;
 	syn_scdir(0);
-	led_crender(r->s, -1, lncol, xleft, xleft + xcols - lncol);
+	led_crender(r->s, -1, lncol, opt_left_col, opt_left_col + xcols - lncol);
 	term_pos(-1, led_pos(r->s, pos) + lncol);
 	sbufn_cut(sb, psn)
 	rstate -= 2;
@@ -398,7 +398,7 @@ char *led_read(int *kmap, int c)
 	while (!TK_INT(c)) {
 		switch (c) {
 		case TK_CTL('f'):
-			*kmap = xkmap_alt;
+			*kmap = keymap_alt;
 			break;
 		case TK_CTL('e'):
 			*kmap = 0;
@@ -464,7 +464,7 @@ static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 			sbuf_mem(cb, cs, nl+!!cs[nl])
 			sbuf_nul4(cb)
 			rstate->s = NULL;
-			led_crender(cb->s, r, vi_lncol, xleft, xleft + xcols - vi_lncol)
+			led_crender(cb->s, r, vi_lncol, opt_left_col, opt_left_col + xcols - vi_lncol)
 			free(cb->s);
 			rstate->s = NULL;
 			cs += nl+!!cs[nl];
@@ -472,7 +472,7 @@ static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 		}
 		nl = r < crow-ctop ? r+ctop : (r-(crow-orow+!!(flg & 4)))+ctop;
 		led_crender(lbuf_get(xb, nl) ? lbuf_get(xb, nl) : "~", r,
-			vi_lncol, xleft, xleft + xcols - vi_lncol)
+			vi_lncol, opt_left_col, opt_left_col + xcols - vi_lncol)
 	}
 	term_pos(crow - ctop, 0);
 	rstate--;
@@ -480,23 +480,23 @@ static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 
 void led_modeswap(void)
 {
-	preserve(int, xquit, xquit = 0;)
+	preserve(int, quit_state, quit_state = 0;)
 	preserve(int, texec, texec = 0;)
-	preserve(int, xvis, xvis ^= 2;)
-	preserve(int, xexec_dep, xexec_dep = 0;)
-	if (xvis & 2)
+	preserve(int, opt_startup_flags, opt_startup_flags ^= 2;)
+	preserve(int, ex_exec_depth, ex_exec_depth = 0;)
+	if (opt_startup_flags & 2)
 		ex();
 	else {
 		syn_setft(xb_ft);
 		vi(1);
 	}
-	if (xquit > 0 || (xquit < -256 && xquit >= -512))
-		restore(xquit)
-	else if (xquit < -512)
-		xquit += 256;
+	if (quit_state > 0 || (quit_state < -256 && quit_state >= -512))
+		restore(quit_state)
+	else if (quit_state < -512)
+		quit_state += 256;
 	restore(texec)
-	restore(xvis)
-	restore(xexec_dep)
+	restore(opt_startup_flags)
+	restore(ex_exec_depth)
 }
 
 /* read a line from the terminal */
@@ -639,7 +639,7 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 				if (suggestsb && search(sb->s + i, sb->s_n - i)) {
 					is->sug = suggestsb->s;
 					pac_:;
-					preserve(int, xtd, xtd = 2;)
+					preserve(int, opt_text_dir, opt_text_dir = 2;)
 					preserve(int, ftidx,)
 					syn_setft(ac_ft);
 					for (int left = 0; r < xrows; r++) {
@@ -648,7 +648,7 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 						if (left >= rstates[2].pos[rstates[2].n])
 							break;
 					}
-					restore(xtd)
+					restore(opt_text_dir)
 					restore(ftidx)
 					r++;
 				}
@@ -657,30 +657,30 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			}
 			temp_pos(0, -1, 0, 0);
 			temp_write(0, sb->s + pre);
-			preserve(struct buf*, ex_buf,)
-			int bidx = istempbuf(ex_buf) ? -1 : ex_buf - bufs;
-			int pidx = ex_pbuf - bufs;
+			preserve(struct buf*, cur_buf,)
+			int bidx = istempbuf(cur_buf) ? -1 : cur_buf - bufs;
+			int pidx = prev_buf - bufs;
 			preserve(int, texec, texec = 0;)
-			preserve(int, xquit, xquit = 0;)
+			preserve(int, quit_state, quit_state = 0;)
 			preserve(int, ftidx,)
 			temp_switch(0, 0);
 			vi(1);
-			exbuf_save(ex_buf)
+			exbuf_save(cur_buf)
 			restore(texec)
-			ex_pbuf = pidx >= xbufcur ? bufs : bufs + pidx;
+			prev_buf = pidx >= buf_count ? bufs : bufs + pidx;
 			if (bidx >= 0)
-				ex_buf = bidx >= xbufcur ? bufs : bufs + bidx;
+				cur_buf = bidx >= buf_count ? bufs : bufs + bidx;
 			else
-				restore(ex_buf)
-			exbuf_load(ex_buf)
+				restore(cur_buf)
+			exbuf_load(cur_buf)
 			syn_setft(xb_ft);
 			vi(1); /* redraw past screen */
 			restore(ftidx)
 			term_pos(xrows, 0);
-			if (xquit > 0 || (xquit < -256 && xquit >= -512))
-				restore(xquit)
-			else if (xquit < -512)
-				xquit += 256;
+			if (quit_state > 0 || (quit_state < -256 && quit_state >= -512))
+				restore(quit_state)
+			else if (quit_state < -512)
+				quit_state += 256;
 			is->t_row = tempbufs[0].row;
 		case TK_CTL('a'):
 			is->t_row = is->t_row < -1 ? tempbufs[0].row : is->t_row;
@@ -704,19 +704,19 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 		case TK_CTL('o'): {
 			if (!*postref)
 				*postref = *post = uc_dup(*post);
-			preserve(struct buf*, ex_buf,)
-			int bidx = istempbuf(ex_buf) ? -1 : ex_buf - bufs;
+			preserve(struct buf*, cur_buf,)
+			int bidx = istempbuf(cur_buf) ? -1 : cur_buf - bufs;
 			preserve(int, ftidx,)
 			led_modeswap();
 			restore(ftidx)
 			if (bidx < 0) {
-				if (ex_buf == tmpex_buf)
+				if (cur_buf == tmpcur_buf)
 					continue;
-				restore(ex_buf)
-				exbuf_load(ex_buf)
-			} else if (bidx != ex_buf - bufs && bidx < xbufcur) {
-				ex_buf = bufs + bidx;
-				exbuf_load(ex_buf)
+				restore(cur_buf)
+				exbuf_load(cur_buf)
+			} else if (bidx != cur_buf - bufs && bidx < buf_count) {
+				cur_buf = bufs + bidx;
+				exbuf_load(cur_buf)
 			}
 			continue; }
 		default:
@@ -727,7 +727,7 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 		}
 		is->sug = NULL;
 		is->_sug = NULL;
-		if (ai_max >= 0 && xpac)
+		if (ai_max >= 0 && opt_print_autocomplete)
 			goto pac;
 	} while (!(flg & 2));
 	return c;
@@ -749,12 +749,12 @@ int led_prompt(sbuf *sb, char *insert, int *kmap, ins_state *is, int ps, int flg
 		ins_init(_is)
 		is = &_is;
 	}
-	preserve(int, xleft, xleft = 0;)
-	preserve(int, xtd, xtd = 2;)
+	preserve(int, opt_left_col, opt_left_col = 0;)
+	preserve(int, opt_text_dir, opt_text_dir = 2;)
 	key = led_line(sb, n, ps, &post, 0, &postref, -1,
-			&off, kmap, is, 0, xrow, xtop, flg);
-	restore(xtd)
-	restore(xleft)
+			&off, kmap, is, 0, cursor_row, view_top_row, flg);
+	restore(opt_text_dir)
+	restore(opt_left_col)
 	if (key == '\n' && flg & 1) {
 		lbuf_dedup(tempbufs[0].lb, sb->s + n, sb->s_n - n)
 		temp_pos(0, -1, 0, 0);
@@ -765,27 +765,27 @@ int led_prompt(sbuf *sb, char *insert, int *kmap, ins_state *is, int ps, int flg
 
 int led_input(sbuf *sb, char *post, int postn, int row, int flg, int *pren)
 {
-	int ai_max = 128 * xai;
-	int n, key, ps = 0, crow = xrow, ctop = xtop;
+	int ai_max = 128 * opt_autoindent;
+	int n, key, ps = 0, crow = cursor_row, ctop = view_top_row;
 	char *postref = NULL;
 	ins_state is;
 	while (1) {
 		ins_init(is)
 		key = led_line(sb, sb->s_n, ps, &post, postn, &postref,
-			ai_max, &xoff, &xkmap, &is, row, crow, ctop, flg);
+			ai_max, &cursor_off, &cur_keymap, &is, row, crow, ctop, flg);
 		if (key != '\n') {
 			*pren = sb->s_n;
-			if (!xled) {
-				xoff = uc_slen(sb->s+ps);
+			if (!opt_line_editor) {
+				cursor_off = uc_slen(sb->s+ps);
 				sbufn_str(sb, post)
 			} else
 				sb->s[*pren] = *post;
 			free(postref);
-			xrow = crow;
+			cursor_row = crow;
 			return key;
 		}
 		sbuf_chr(sb, key)
-		led_printparts(sb, -1, ps, "", 0, &xoff);
+		led_printparts(sb, -1, ps, "", 0, &cursor_off);
 		term_chr('\n');
 		term_room(1);
 		crow++;
