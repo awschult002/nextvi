@@ -1941,6 +1941,68 @@ static int vc_replace(void)
 	return cs[0] == '\n' ? 1 : 2;
 }
 
+/* the word under the cursor in ln, its bytes in len, its offset in beg */
+static char *vi_spellword(char *ln, int *len, int *beg)
+{
+	int i, off = ren_noeol(ln, xoff);
+	char **chrs = rstate->chrs;
+	for (i = off; i < rstate->n && uc_kind(chrs[i]) == 1; i++);
+	for (; off > 0 && uc_kind(chrs[off - 1]) == 1; off--);
+	if (beg)
+		*beg = off;
+	*len = chrs[i] - chrs[off];
+	return *len ? chrs[off] : NULL;
+}
+
+/* replace the misspelled word under the cursor with its vi_arg suggestion */
+static void vc_spell(void)
+{
+	char *ln = lbuf_get(xb, xrow), *w, *sug;
+	int beg, len, slen;
+	if (!ln || !spcnt)
+		return;
+	w = vi_spellword(ln, &len, &beg);
+	if (!w || !(sug = spell_get(w, len))) {
+		vi_drawmsg_mpt("not misspelled")
+		return;
+	}
+	if (!(sug = spell_sug(sug, MAX(1, vi_arg), &slen))) {
+		vi_drawmsg_mpt("no such suggestion")
+		return;
+	}
+	sbuf_smake(sb, lbuf_s(ln)->len + slen)
+	sbuf_mem(sb, ln, w - ln)
+	sbuf_mem(sb, sug, slen)
+	sbufn_str(sb, w + len)
+	xoff = beg;
+	lbuf_edit(xb, sb->s, xrow, xrow + 1, beg, beg);
+	free(sb->s);
+	rep_record()
+}
+
+/* the numbered suggestions of the misspelled word under the cursor */
+static void vi_spellmsg(void)
+{
+	char *ln = lbuf_get(xb, xrow), *w, *sug, num[32];
+	int len, slen, n;
+	if (!ln || !(w = vi_spellword(ln, &len, NULL)) || !(sug = spell_get(w, len)))
+		return;
+	sbuf_smake(sb, 128)
+	for (n = 1; (w = spell_sug(sug, n, &slen)); n++) {
+		if (sb->s_n + slen + 6 > xcols * 4)	/* up to 4 bytes per column */
+			break;
+		if (n > 1)
+			sbuf_chr(sb, ' ')
+		sbuf_mem(sb, num, itoa(n, num) - num)
+		sbuf_chr(sb, ':')
+		sbuf_mem(sb, w, slen)
+	}
+	sbuf_nul(sb)
+	if (sb->s_n)
+		vi_drawmsg_mpt(sb->s)
+	free(sb->s);
+}
+
 static void vc_execute(int cmd)
 {
 	static int exec_buf = -1;
@@ -2559,6 +2621,9 @@ void vi(int init)
 					ex_command(cmd)
 					restore(xled)
 					vi_mod |= 1;
+				} else if (k == 's') {
+					vc_spell();
+					vi_mod |= 2;
 				} else if (k == '~' || k == 'u' || k == 'U') {
 					vc_motion(k);
 				} else if (k == 'v' || k == 'V' || k == 'b') {
@@ -2841,6 +2906,8 @@ static void *vi_rendloop(void *arg)
 			if (xmpt > 0)
 				xmpt = 0;
 		}
+		if (spcnt && !xmpt)		/* drawn last, a scroll carries it along */
+			vi_spellmsg();
 		vi_curpos(n, vi_lncol)
 		term_commit();
 		pthread_mutex_lock(&r->mtx);

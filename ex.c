@@ -1493,6 +1493,170 @@ static void *ec_ft(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/* misspelled words and their suggestions, "word\0sug, sug\0" per entry */
+static sbuf *spsb;
+static char **spidx;		/* spsb entries, sorted by word */
+static int spcnt;		/* entries in spidx */
+static char *sppat;		/* the armed misspelled words pattern */
+static char *spcmd;		/* the speller in use */
+static char spmsg[128];		/* the speller's own complaint, forwarded */
+
+/* speller lines by word, "& word cnt off: sug, sug" and "# word off" */
+static int spell_cmp(const void *v1, const void *v2)
+{
+	char *s1 = *(char *const *)v1 + 2, *s2 = *(char *const *)v2 + 2;
+	for (; *s1 == *s2 && *s1 && *s1 != ' '; s1++, s2++);
+	return (unsigned char)*s1 - (unsigned char)*s2;
+}
+
+/* the suggestions of a misspelled word, NULL when it is spelled correctly */
+static char *spell_get(char *word, int len)
+{
+	int lo = 0, hi = spcnt - 1, mid, ret;
+	while (lo <= hi) {
+		mid = (lo + hi) / 2;
+		ret = strncmp(spidx[mid], word, len);
+		ret = ret ? ret : (unsigned char)spidx[mid][len];
+		if (!ret)
+			return spidx[mid] + len + 1;
+		else if (ret < 0)
+			lo = mid + 1;
+		else
+			hi = mid - 1;
+	}
+	return NULL;
+}
+
+/* the nth suggestion of sugs, NULL past the last one */
+static char *spell_sug(char *sugs, int n, int *len)
+{
+	char *end;
+	for (; n > 1; n--) {
+		if (!(sugs = strchr(sugs, ',')))
+			return NULL;
+		sugs += sugs[1] == ' ' ? 2 : 1;
+	}
+	if (!*sugs)
+		return NULL;
+	end = strchr(sugs, ',');
+	*len = end ? end - sugs : (int)strlen(sugs);
+	return sugs;
+}
+
+static void spell_clear(void)
+{
+	if (spsb)
+		sbuf_free(spsb)
+	spsb = NULL;
+	free(spidx);
+	spidx = NULL;
+	free(sppat);
+	sppat = NULL;
+	spcnt = 0;
+	syn_blockhl = -1;
+	syn_reloadft(syn_addhl(NULL, 5), 0);
+}
+
+static void *ec_spell(char *loc, char *cmd, char *arg)
+{
+	char msg[128], *s, *e, *w, *sug, *last = NULL, **miss;
+	int i, n, len, off, cnt = 0, ret = 0;
+	if (strchr(cmd, '!')) {
+		spell_clear();
+		return NULL;
+	}
+	if (arg[0]) {
+		free(spcmd);
+		spcmd = emalloc(strlen(arg) + 1);
+		strcpy(spcmd, arg);
+	}
+	if (syn_findhl(5) < 0)
+		return "filetype has no sl slot";
+	sbuf_smake(in, 1024)
+	sbuf_str(in, "!\n")		/* terse mode, only misses are reported */
+	for (i = 0; i < lbuf_len(xb); i++) {
+		sbuf_chr(in, '^')	/* the line is text, never a command */
+		sbuf_str(in, lbuf_get(xb, i))
+	}
+	sbuf_nul(in)
+	sbuf_smake(scmd, 128)
+	sbuf_str(scmd, spcmd ? spcmd : spell_cmd)
+	for (i = 0; i < spell_ftslen; i++)
+		if (spell_fts[i].ft == xb_ft) {
+			sbuf_chr(scmd, ' ')
+			sbuf_str(scmd, spell_fts[i].arg)
+			break;
+		}
+	sbufn_str(scmd, " 2>&1")	/* diagnostics into the pipe, not the screen */
+	sbuf *out = cmd_pipe(scmd->s, in, 1, &ret);
+	free(scmd->s);
+	free(in->s);
+	if (!out)
+		return "fork failed";
+	spell_clear();
+	sbuf_smake(lns, 512)
+	for (s = out->s; (e = strchr(s, '\n')); s = e + 1) {
+		*e = '\0';
+		last = e > s ? s : last;
+		if ((s[0] == '&' || s[0] == '#') && s[1] == ' ' && s[2])
+			sbuf_mem(lns, &s, sizeof(s))
+	}
+	miss = (char **)lns->s;
+	n = lns->s_n / sizeof(*miss);
+	qsort(miss, n, sizeof(*miss), spell_cmp);
+	sbuf_make(spsb, 512)
+	sbuf_smake(offs, 256)
+	sbuf_smake(pat, 256)
+	sbuf_str(pat, "\\<(?:")
+	for (i = 0; i < n; i++) {
+		if (i && !spell_cmp(&miss[i - 1], &miss[i]))
+			continue;	/* the speller repeats a word per hit */
+		w = miss[i] + 2;
+		if (!(sug = strchr(w, ' ')))
+			continue;
+		len = sug - w;
+		sug = miss[i][0] == '&' ? strchr(sug, ':') : NULL;
+		sug = sug && sug[1] ? sug + 2 : "";
+		off = spsb->s_n;
+		sbuf_mem(offs, &off, sizeof(off))
+		sbuf_mem(spsb, w, len)
+		sbuf_chr(spsb, '\0')
+		sbuf_str(spsb, sug)
+		sbufn_chr(spsb, '\0')
+		cnt++;
+		if (cnt > 1)
+			sbuf_chr(pat, '|')
+		ex_regesc(pat, w, w + len, 0);
+	}
+	sbufn_str(pat, ")\\>")
+	spcnt = cnt;
+	if (spcnt) {
+		spidx = emalloc(spcnt * sizeof(*spidx));
+		for (i = 0; i < spcnt; i++)
+			spidx[i] = spsb->s + ((int *)offs->s)[i];
+	}
+	if (ret && !cnt)	/* the last line tells a missing dictionary
+				 * from a missing speller */
+		snprintf(spmsg, sizeof(spmsg), "speller failed: %s",
+				last ? last : "no output");
+	free(offs->s);
+	free(lns->s);
+	sbuf_free(out)
+	if (!cnt) {
+		free(pat->s);
+		spell_clear();
+		if (ret)
+			return spmsg;
+	} else {
+		sppat = pat->s;
+		syn_blockhl = -1;
+		syn_reloadft(syn_addhl(sppat, 5), 0);
+	}
+	snprintf(msg, sizeof(msg), "%d misspelled", cnt);
+	ex_print(msg, msg_ft)
+	return NULL;
+}
+
 static void *ec_cmap(char *loc, char *cmd, char *arg)
 {
 	if (arg[0])
@@ -2212,6 +2376,8 @@ static struct excmd excmds[] = {
 	EO(seq),
 	{"sc!", ec_specials},
 	{"sc", ec_specials},
+	{"sl!", ec_spell},
+	{"sl", ec_spell},
 	EO(sw),
 	{"s", ec_substitute},
 	{"xa!", ec_writeall},

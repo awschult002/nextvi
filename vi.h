@@ -680,6 +680,13 @@ extern struct placeholder _ph[];
 extern struct placeholder *ph;
 extern int phlen;
 extern const int conf_hlrev;
+extern char spell_cmd[];
+struct spellft {
+	char *ft;		/* the filetype */
+	char *arg;		/* extra speller arguments for it */
+};
+extern struct spellft spell_fts[];
+extern const int spell_ftslen;
 extern const int conf_hlmat;
 extern const int conf_hlmatc;
 char **conf_kmap(int id);

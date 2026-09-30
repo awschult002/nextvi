@@ -49,6 +49,10 @@ static struct {
 
 /* access mode of new files */
 const int conf_mode = 0600;
+
+/* the speller of the sl command, must speak the ispell pipe protocol */
+char spell_cmd[] = "aspell -a";
+
 #define FTGEN(ft) static char ft##_ft[] = #ft;
 #define FT(ft) ft##_ft
 FTGEN(c) FTGEN(roff) FTGEN(tex) FTGEN(mbox)
@@ -94,6 +98,29 @@ struct filetype fts[] = {
 };
 const int ftslen = LEN(fts);
 
+/* aspell's context filter, checking only "#" comments; the stock comment
+ * mode is the inverse, it hides comments and checks the code */
+#define SPHASH	"--mode=none --add-filter=context --clear-context-delimiters "\
+		"--dont-context-visible-first --add-context-delimiters='# \\0'"
+
+/* per filetype speller arguments, aspell filter modes: sl reads the prose of
+ * a source file, not its identifiers. Change along with spell_cmd for a
+ * speller other than aspell */
+struct spellft spell_fts[] = {
+	{FT(c), "--mode=ccpp"},
+	{FT(js), "--mode=ccpp"},
+	{FT(go), "--mode=ccpp"},
+	{FT(mk), SPHASH},
+	{FT(sh), SPHASH},
+	{FT(py), SPHASH},
+	{FT(roff), "--mode=nroff"},
+	{FT(tex), "--mode=tex"},
+	{FT(mbox), "--mode=email"},
+	{FT(html), "--mode=html"},
+	{FT(md), "--mode=markdown"}
+};
+const int spell_ftslen = LEN(spell_fts);
+
 #define NA	0	/* no attribute */
 #define RE	1	/* red */
 #define GR	2	/* green */
@@ -112,6 +139,9 @@ const int ftslen = LEN(fts);
 #define WH1	15	/* bright white */
 
 #define A(...) (int[]){__VA_ARGS__}
+/* att of the misspelled words, used by sl; set 9 is theirs alone, an earlier
+ * filetype rule on the line, a comment or a heading, never swallows them */
+#define SP	A(SYN_BGMK(RE1) | SYN_OWR)
 
 /* At least 1 entry is required in this struct for fallback */
 /* lbuf lines are *always "\n\0" terminated, for $ to work one needs to account for '\n' too */
@@ -119,6 +149,7 @@ struct highlight hls[] = {
 	{_ft, NULL, A(CY1 | SYN_BD), 1, 2},  /* <-- optional, used by hll if set */
 	{_ft, NULL, A(RE1 | SYN_BGMK(GR1)), 0, 3}, /* <-- optional, used by hlp if set */
 	{_ft, NULL, A(RE1), 0, 1}, /* <-- optional, used by hlw if set */
+	{_ft, NULL, SP, 9, 5}, /* <-- optional, used by sl if set */
 
 	{FT(c), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(c), "(/\\*(?:(?!^\\*/).)*)|((?:(?!^/\\*)(?!^//).)*\\*/\
@@ -147,6 +178,7 @@ bool|const|inline|restrict|auto|(true|false|_?_?asm_?_?|mem(?:set|cpy|cmp)|free|
 	{FT(c), NULL, A(RE1 | SYN_BGMK(BL1)), 0, 3},
 	{FT(c), "(\\?).+?(:)", A(SYN_IGN, YE | SYN_SATT, 2, NA, CY1,
 				YE | SYN_SATT, 2, NA, CY1), 5},
+	{FT(c), NULL, SP, 9, 5},
 
 	{FT(roff), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(roff), "^[.'][ \t]*(([sS][hH].*)|(de) (.*)|([^ \t\\\\]{2,}))?.*",
@@ -156,6 +188,7 @@ bool|const|inline|restrict|auto|(true|false|_?_?asm_?_?|mem(?:set|cpy|cmp)|free|
 	{FT(roff), "\\\\{1,2}[*$fgkmns](?:[^[\\(]|\\(..|\\[[^\\]]*\\])", A(YE)},
 	{FT(roff), "\\\\(?:[^[\\(*$fgkmns]|\\(..|\\[[^\\]]*\\])", A(YE)},
 	{FT(roff), "\\$[^$]+\\$", A(YE)},
+	{FT(roff), NULL, SP, 9, 5},
 
 	{FT(tex), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(tex), NULL, A(RE1), 0, 1},
@@ -163,6 +196,7 @@ bool|const|inline|restrict|auto|(true|false|_?_?asm_?_?|mem(?:set|cpy|cmp)|free|
 		A(BL | SYN_BD, NA, YE, NA, MA)},
 	{FT(tex), "\\$[^$]+\\$", A(YE)},
 	{FT(tex), "%.*", A(GR | SYN_IT)},
+	{FT(tex), NULL, SP, 9, 5},
 
 	{FT(mbox), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(mbox), NULL, A(RE1), 0, 1},
@@ -173,6 +207,7 @@ bool|const|inline|restrict|auto|(true|false|_?_?asm_?_?|mem(?:set|cpy|cmp)|free|
 	{FT(mbox), "^Cc: (.*)", A(CY | SYN_BD, MA | SYN_BD)},
 	{FT(mbox), "^[-A-Za-z]+: .+", A(CY | SYN_BD)},
 	{FT(mbox), "^> .*", A(GR | SYN_IT)},
+	{FT(mbox), NULL, SP, 9, 5},
 
 	{FT(mk), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(mk), NULL, A(RE1), 0, 1},
@@ -180,6 +215,7 @@ bool|const|inline|restrict|auto|(true|false|_?_?asm_?_?|mem(?:set|cpy|cmp)|free|
 	{FT(mk), "\\$[\\({][a-zA-Z0-9_]+[\\)}]|\\$\\$", A(YE)},
 	{FT(mk), "#.*", A(GR | SYN_IT)},
 	{FT(mk), "([A-Za-z_%.\\-]+):", A(NA, SYN_BD)},
+	{FT(mk), NULL, SP, 9, 5},
 
 	{FT(sh), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(sh), NULL, A(RE1), 0, 1},
@@ -192,6 +228,7 @@ bool|const|inline|restrict|auto|(true|false|_?_?asm_?_?|mem(?:set|cpy|cmp)|free|
 	{FT(sh), "\\$(?:\\{[^}]+}|[a-zA-Z_0-9]+|[!#$?*@-])", A(RE)},
 	{FT(sh), "^([a-zA-Z_0-9]* *\\(\\)) *\\{", A(NA, SYN_BD)},
 	{FT(sh), "^\\. .*", A(SYN_BD)},
+	{FT(sh), NULL, SP, 9, 5},
 
 	{FT(py), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(py), NULL, A(RE1), 0, 1},
@@ -204,6 +241,7 @@ for|from|global|if|import|in|is|lambda|not|or|pass|print|raise|return|try|while)
 		A(CY | SYN_BLK, SYN_BSE | SYN_BSDP | SYN_BEDP)},
 	{FT(py), "[\"](?:\\\\\"|[^\"])*?[\"]", A(BL)},
 	{FT(py), "['](?:\\\\'|[^'])*?[']", A(BL)},
+	{FT(py), NULL, SP, 9, 5},
 
 	{FT(js), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(js), "(/\\*(?:(?!^\\*/).)*)|((?:(?!^/\\*).)*\\*/(?![\"'`]))",
@@ -222,6 +260,7 @@ length|Math|NaN|name|Number|Object|prototype|String|toString|undefined|valueOf))
 	{FT(js), "'(?:[^'\\\\]|\\\\.)*'", A(MA)},
 	{FT(js), "\"(?:[^\"\\\\]|\\\\.)*\"", A(MA)},
 	{FT(js), "`(?:[^`\\\\]|\\\\.)*`", A(MA)},
+	{FT(js), NULL, SP, 9, 5},
 
 	{FT(html), "<(/)?(?:[^>](?:\".*?\")*(?:'.*?')*(?:<.*?>)*)+>", A(YE, MA1), 1},
 	{FT(html), "^(?:[ \t.,#*:a-zA-Z0-9_-]+(?:\\(.*\\))*(?:\\[.*\\])*[ \t+~>]?)*(?=^\\{)", A(WH1), 2},
@@ -276,12 +315,14 @@ fr|deg|rad|turn|grad|ms|s|hz|khz|dpi|dpcm|dppx|%|))\\>", A(RE1 | SYN_ATT, 4, 69,
 	{FT(html), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(html), NULL, A(RE1), 0, 1},
 	{FT(html), NULL, A(AY | SYN_BGMK(RE1)), 0, 3},
+	{FT(html), NULL, SP, 9, 5},
 
 	{FT(diff), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(diff), "^-.*", A(RE)},
 	{FT(diff), "^\\+.*", A(GR)},
 	{FT(diff), "^@.*", A(CY)},
 	{FT(diff), "^diff .*", A(SYN_BD)},
+	{FT(diff), NULL, SP, 9, 5},
 
 	{FT(go), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(go), "(/\\*(?:(?!^\\*/).)*)|((?:(?!^/\\*).)*\\*/(?#-1)(?<\".*\\*/.*\"))",
@@ -300,6 +341,7 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
 	{FT(go), "[a-zA-Z0-9_]+(?=^\\()", A(SYN_BD)},
 	{FT(go), "'(?:[^\\\\]|\\\\.|\\\\x[0-9a-fA-F]{2}|\\\\u[0-9a-fA-F]{4}|\\\\U[0-9a-fA-F]{8}|\\\\[0-7]{3})'", A(MA)},
 	{FT(go), "[-+.]?\\<(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|[0-9]+\\.?[0-9eEi]*|[0-9]+)\\>", A(RE1)},
+	{FT(go), NULL, SP, 9, 5},
 
 	{FT(md), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(md), NULL, A(RE1), 0, 1},
@@ -323,6 +365,7 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
 	{FT(md), "^[ \t]*[0-9]+[.] ", A(YE)},
 	{FT(md), "[[][^[\\]]+[\\]]\\([^\\(\\)]+\\)", A(CY)},
 	{FT(md), "![[][^[\\]]+[\\]]\\([^\\(\\)]+\\)", A(MA)},
+	{FT(md), NULL, SP, 9, 5},
 
 	{fm_ft, "^.+\n$", A(AY1), 1},
 	{fm_ft, "(^\\.?\\.?)/|(\\.\\.(/))|(?:[^/]+/)+", A(CY, BL, BL, CY), 2},
@@ -347,11 +390,12 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
 (?:([,;]#?)[ \t]*((?:\\|(?:[^|\\\\]|\\\\.?)*\\|?[ \t]*)*(?:(?:<(?:[^<\\\\]|\\\\.?)*<?|>(?:[^>\\\\]|\\\\.?)*>?)|\
 (?:'[0-9]+)|([.$]|[0-9 \t]*)?))(?:([-*-+/%])[ \t]*([0-9]+)[ \t]*)*(?:[ \t]*\\|(?:[^|\\\\]|\\\\.?)*\\|?)*[ \t]*)*)\
 ((pac|sw|et|idt|pr|aco!?|ai|ar|aspec|ish|err|fr|ic|grp|mpt|rr|shape|seq|ts|td|tc|order|hl(?:lw|[lwpr])?|left|lim|led|vis)\
-|[@&!dj]|m!?|=\\?{0,1}|\\?~|\\?{1,2}[?!]?|b[psx]?|p[uh]?|aretry|apack!?|acm?|ast|a[!~]?|exspec|e[f!]?!?|f[-+><tdp]?|inc|i|sc!?|lsp|lw|\
+|[@&!dj]|m!?|=\\?{0,1}|\\?~|\\?{1,2}[?!]?|b[psx]?|p[uh]?|aretry|apack!?|acm?|ast|a[!~]?|exspec|e[f!]?!?|f[-+><tdp]?|inc|i|sl!?|sc!?|lsp|lw|\
 (?:g!?|s)[ \t]?(.)?|q!?|reg?\\+?|rd?|w(?:q!|q?a!?|[q!])?|u[czbd]|xa?!?|ya[!+]?|cm!?|cd?)?",
 		A(BL1 | SYN_BD, RE, RE, RE, RE, WH1, MA1, RE, RE, WH1, RE, GR1, CY1, MA1)},
 	{ex_ft, "\\\\(.)", A(AY1 | SYN_BD, YE)},
 	{ex_ft, "!(?:[^!\\\\]|\\\\.?)*!?|%(?:#|[0-9]+|@([0-9]+))?", A(WH1 | SYN_BD, CY1)},
+	{ex_ft, NULL, SP, 9, 5},
 
 	{vs_ft, ".+", A(AY1 | SYN_BD), 1},
 	{vs_ft, "(^[?/])|(\\\\[<>]|\\(\\?[:=!<>#]|\\[\\^?((?:\\\\.?|[^\\]])*)]|\\[|[.^$\\()*+|?]|\\{([0-9]*(,)?[0-9]*)?}?)|\\\\(.)",
@@ -379,7 +423,7 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
 const int hlslen = LEN(hls);
 
 /* ids of optional hls, reset and reloaded on filetype change */
-const int hlopts[] = {1, 2};
+const int hlopts[] = {1, 2, 5};
 const int hloptslen = LEN(hlopts);
 
 /* how to highlight text in the reverse direction */
