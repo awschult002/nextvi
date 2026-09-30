@@ -467,6 +467,7 @@ is.sug_pt = -1; \
 is.sug = NULL; \
 is._sug = NULL; \
 
+#define LED_AGENT 8 /* return control keys to the conversation prompt */
 int led_prompt(sbuf *sb, char *insert, int *kmap, ins_state *is, int ps, int flg);
 int led_input(sbuf *sb, char *post, int postn, int row, int flg, int *pren,
 	int source_beg, int source_end);
@@ -551,6 +552,7 @@ extern int xsw;
 extern int xidt;
 extern int xish;
 extern int xgrp;
+extern int xaspec;
 extern int xpac;
 extern int xtc;
 extern int xmpt;
@@ -581,7 +583,7 @@ extern sbuf **xregs;
 extern int xregs_n;
 extern int xdefreg;
 extern struct buf *bufs;
-extern struct buf tempbufs[3];
+extern struct buf tempbufs[5];
 extern struct buf *ex_buf;
 extern struct buf *ex_pbuf;
 #define istempbuf(buf) (buf >= tempbufs && buf < tempbufs + LEN(tempbufs))

@@ -13,13 +13,17 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
+#include <errno.h>
+#include "cJSON.c"
 #include <pthread.h>
 #include <sys/resource.h>
 #include <pthread.h>
 #include <sys/resource.h>
 #include "vi.h"
 #include "conf.c"
+#include "agent.h"
 #include "ex.c"
+#include "agent.c"
 #include "lbuf.c"
 #include "led.c"
 #include "regex.c"
@@ -2911,6 +2915,7 @@ int main(int argc, char *argv[])
 	temp_open(0, "/hist/", _ft);
 	temp_open(1, "/fm/", fm_ft);
 	temp_open(2, "/sc/", _ft);
+	agent_init();
 	for (i = 1; i < argc && argv[i][0] == '-'; i++) {
 		if (argv[i][1] == '-' && !argv[i][2]) {
 			i++;

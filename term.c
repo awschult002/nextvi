@@ -40,6 +40,7 @@ void term_done(void)
 		return;
 	term_commit();
 	sbuf_free(term_sbuf)
+	term_sbuf = NULL;
 	tcsetattr(term_ufd.fd, 0, &termios);
 }
 
@@ -148,6 +149,12 @@ int term_read(int winch)
 			xquit = !xquit ? 1 : xquit;
 			if (texec == '&')
 				goto err;
+		}
+		if (agent_tool) {
+			agent_input_blocked = 1;
+			xquit = !xquit ? 1 : xquit;
+			*tibuf = TK_CTL('c');
+			goto ret;
 		}
 		if (term_winch && winch) {
 			*tibuf = winch;	/* yield until term_winch is cleared */
@@ -301,6 +308,9 @@ char *xgetenv(char **q)
 /* execute a command; pass in input if ibuf and process output if oproc */
 sbuf *cmd_pipe(char *cmd, sbuf *ibuf, int oproc, int *status)
 {
+	int terminal = !ibuf && term_sbuf;
+	if (agent_tool)
+		return agent_shell(cmd, ibuf, oproc, status);
 	static char *sh[] = {"$SHELL", "sh", NULL};
 	struct pollfd fds[3];
 	char buf[512];
@@ -372,7 +382,7 @@ sbuf *cmd_pipe(char *cmd, sbuf *ibuf, int oproc, int *status)
 	tcsetpgrp(term_ufd.fd, getpgrp());
 	signal(SIGTTOU, SIG_DFL);
 	if (!ibuf) {
-		if (term_sbuf)
+		if (terminal)
 			term_init();
 		signal(SIGINT, SIG_DFL);
 	}

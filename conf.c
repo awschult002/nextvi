@@ -1,5 +1,52 @@
 #include "kmap.h"
 
+/* Embedded subzeroclaw configuration. NULL log_dir uses $HOME/.nextvi/logs. */
+static char *log_dir;
+#define LOCAL 1
+#define OPENROUTER 1
+
+#if LOCAL == 1
+static char *api_key = "local";
+static char *endpoint = "http://127.0.0.1:8080/v1/chat/completions";
+static char *request_extra = "{}";
+static int request_timeout = 5000;
+#elif OPENROUTER == 1
+static char *api_key = "YOUR_OPENROUTER_API_KEY";
+static char *endpoint = "https://openrouter.ai/api/v1/chat/completions";
+static char *request_extra = "{\"model\":\"PROVIDER/MODEL_ID\"}";
+static int request_timeout = 500;
+#endif
+
+static int max_tool_rounds = 300;
+int xgr = 2;	/* agent guardrails: anything but 2 = disabled */
+int xar;	/* display returned agent reasoning (:ar) */
+int xaco;	/* autocompact input-token threshold; 0 disables */
+static int xaco_browse;	/* last selected mode: aco! rather than aco */
+
+static char exspec_insert[] =
+	"Ex special characters are disabled and raw ex mode is on by default.\n"
+	"Supply literal text as [str] directly. No dot terminator or escapes required.\n"
+	"[str] is required.";
+
+/* Additional :exspec lines; repeat a command to append more lines. */
+static struct {
+	char *cmd, *text;
+} conf_exspec[] = {
+	{"i", exspec_insert},
+	{"c", exspec_insert},
+	{"p", "Cursor position is stateful; left at the range position it landed on."},
+	{"p", "Keep reads small and within buffer bounds."},
+	{"p", "Check the position with = and line count with $= before printing ranges."},
+	{"p", "Use character ranges for long lines; stop when you have enough context."},
+	{"p", "Ex special characters disabled by default. p % example will not work."},
+	{"g", "Ex special characters disabled by default. Command chaining unavailable."},
+	{"w", "Ex special characters disabled by default. Do not escape ! character."},
+	{"r", "Ex special characters disabled by default. Do not escape ! character."},
+	{"parsing", "Ex special characters disabled by default. Command chaining unavailable."},
+	{"escapes", "Ex special characters disabled by default."},
+	{"expansion", "Ex special characters disabled by default. Expansion unavailable."},
+};
+
 /* access mode of new files */
 const int conf_mode = 0600;
 #define FTGEN(ft) static char ft##_ft[] = #ft;
@@ -299,8 +346,8 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
 (?:'[0-9]+)|([.%$]|[0-9 \t]*)?))(?:([-*-+/%])[ \t]*[0-9]+[ \t]*)*(?:[ \t]*\\|(?:[^|\\\\]|\\\\.?)*\\|?[ \t]*)*)[ \t]*\
 (?:([,;]#?)[ \t]*((?:\\|(?:[^|\\\\]|\\\\.?)*\\|?[ \t]*)*(?:(?:<(?:[^<\\\\]|\\\\.?)*<?|>(?:[^>\\\\]|\\\\.?)*>?)|\
 (?:'[0-9]+)|([.$]|[0-9 \t]*)?))(?:([-*-+/%])[ \t]*([0-9]+)[ \t]*)*(?:[ \t]*\\|(?:[^|\\\\]|\\\\.?)*\\|?)*[ \t]*)*)\
-((pac|sw|et|idt|pr|ai|ish|err|fr|ic|grp|mpt|rr|shape|seq|ts|td|tc|order|hl(?:lw|[lwpr])?|left|lim|led|vis)\
-|[@&!dmj]|=\\?{0,1}|\\?{1,2}[?!]?|b[psx]?|p[uh]?|ac|e[f!]?!?|f[-+><tdp]?|lsp|inc|i|sc!?|lw|\
+((pac|pr|aco!?|ai|ar|aspec|ish|err|fr|ic|grp|mpt|rr|shape|seq|ts|td|order|hl[lwpr]?|left|lim|led|vis)\
+|[@&!dj]|m!?|=\\?{0,1}|\\?~|\\?{1,2}[?!]?|b[psx]?|p[uh]?|aretry|apack!?|acm?|ast|a[!~]?|exspec|e[f!]?!?|f[-+><tdp]?|inc|i|sc!?|\
 (?:g!?|s)[ \t]?(.)?|q!?|reg?\\+?|rd?|w(?:q!|[q!])?|u[czbd]|x!?|ya[!+]?|cm!?|cd?)?",
 		A(BL1 | SYN_BD, RE, RE, RE, RE, WH1, MA1, RE, RE, WH1, RE, GR1, CY1, MA1)},
 	{ex_ft, "\\\\(.)", A(AY1 | SYN_BD, YE)},

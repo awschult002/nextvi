@@ -670,6 +670,8 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 		len = sb->s_n;
 		c = term_read(TK_CTL('l'));
 		noredraw:
+		if ((flg & LED_AGENT) && (c == TK_CTL('o') || c == TK_CTL('l')))
+			return c;
 		switch (c) {
 		case TK_CTL('h'):
 			c = 127;
@@ -840,9 +842,17 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			preserve(int, texec, texec = 0;)
 			preserve(int, xquit, xquit = 0;)
 			preserve(int, ftidx,)
+			preserve(int, xexec_dep, if (flg & LED_AGENT) xexec_dep = 0;)
+			preserve(int, xvis, if (flg & LED_AGENT) xvis &= ~2;)
+			preserve(int, xmpt, if (flg & LED_AGENT) xmpt = 0;)
+			preserve(int, xpln, if (flg & LED_AGENT) xpln = 0;)
 			preserve(struct ts_state*, ts_preview, ts_preview = NULL;)
 			temp_switch(0, 0);
 			vi(1);
+			restore(xpln)
+			restore(xmpt)
+			restore(xvis)
+			restore(xexec_dep)
 			exbuf_save(ex_buf)
 			restore(texec)
 			ex_pbuf = pidx >= xbufcur ? bufs : bufs + pidx;
@@ -852,7 +862,8 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 				restore(ex_buf)
 			exbuf_load(ex_buf)
 			syn_setft(xb_ft);
-			vi(1); /* redraw past screen */
+			if (!(flg & LED_AGENT))
+				vi(1); /* redraw past screen */
 			restore(ftidx)
 			restore(ts_preview)
 			term_pos(xrows, 0);

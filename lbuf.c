@@ -230,6 +230,14 @@ void lbuf_edit(struct lbuf *lb, char *buf, int beg, int end, int o1, int o2)
 		free(sb->s);
 	else
 		lo->ins = (char**)sb->s;
+	if (agent_tool) {
+		char msg[64];
+		/* Report a zero-based, half-open span, like ex range beg/end. */
+		int last = MAX(end, beg + lo->n_ins);
+		snprintf(msg, sizeof(msg), "edited lines beg: %d end: %d", beg, last);
+		ex_print(msg, msg_ft)
+	}
+	agent_sync(lb);
 }
 
 int lbuf_rd(struct lbuf *lb, int fd, int beg, int end)
@@ -427,6 +435,7 @@ int lbuf_undo(struct lbuf *lb, int *row, int *off)
 	lbuf_copymark(lb->mark_sb, lo->mark_sb)
 	lbuf_copymark(lb->mark_se, lo->mark_se)
 	lb->modified = lb->hist_u != lb->saved;
+	agent_sync(lb);
 	return 0;
 }
 
@@ -454,6 +463,7 @@ int lbuf_redo(struct lbuf *lb, int *row, int *off)
 		lbuf_copymark(lb->mark_se, (lb->tmp_mark + 2))
 	}
 	lb->modified = lb->hist_u != lb->saved;
+	agent_sync(lb);
 	return 0;
 }
 
