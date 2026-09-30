@@ -18,6 +18,7 @@ int xidt = 500;			/* auto-detect indent on file open */
 int xish;			/* interactive shell */
 int xgrp;			/* regex search group */
 int xpac;			/* print autocomplete options */
+int xtc = 1;			/* tab path completion, 1: inline, 2: full screen */
 int xmpt;			/* whether to prompt after printing > 1 lines in vi */
 int xpr;			/* ex_cprint register */
 int xlim = -1;			/* rendering cutoff for non cursor lines */
@@ -1764,7 +1765,7 @@ static void *eo_##opt(char *loc, char *cmd, char *arg) { inner }
 
 EO(pac) EO(pr) EO(ai) EO(err) EO(fr) EO(ish) EO(ic) EO(mpt)
 EO(rr) EO(shape) EO(seq) EO(order) EO(hll) EO(hlw)
-EO(hlp) EO(hl) EO(lim) EO(led) EO(vis)
+EO(hlp) EO(hl) EO(lim) EO(led) EO(vis) EO(tc)
 EO(et) EO(idt)
 
 _EO(ts, xts = *arg ? eo_val(arg) : !xts; xts = MAX(0, xts); RST_NULL(0, 1, 2) return NULL;)
@@ -1911,6 +1912,7 @@ static struct excmd {
 	{"j", ec_join},
 	EO(ts),
 	EO(td),
+	EO(tc),
 	EO(order),
 	EO(hll),
 	EO(hlw),

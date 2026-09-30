@@ -1,5 +1,6 @@
 static sbuf *suggestsb;
 static sbuf *acsb;
+static sbuf *compsb;
 static sbuf *extsb;
 
 static int search(const char *pattern, int l)
@@ -348,6 +349,93 @@ static int led_lastword(char *s)
 	return r - s;
 }
 
+/* complete the path at the end of sb, lst gets the matches, typed gets the
+length of the part already there; returns the count of the matches */
+static int led_pathcomp(sbuf *sb, int pre, sbuf *lst, int *typed)
+{
+	DIR *dp;
+	struct dirent *dirp;
+	struct stat st;
+	char *base;
+	int i, n = 0, wo, bo, blen, mlen = 0;
+	sbuf_smake(path, 128)
+	for (wo = sb->s_n; wo > pre; wo--)
+		if (sb->s[wo-1] == ' ' || sb->s[wo-1] == '\t')
+			break;
+	for (bo = wo, i = sb->s_n; i > wo; i--)
+		if (sb->s[i-1] == '/') {
+			bo = i;
+			break;
+		}
+	sbuf_mem(path, sb->s + wo, bo - wo)
+	sbuf_nul4(path)
+	base = sb->s + bo;
+	*typed = blen = sb->s_n - bo;
+	if (!(dp = opendir(path->s_n ? path->s : "."))) {
+		free(path->s);
+		return 0;
+	}
+	while ((dirp = readdir(dp))) {
+		if (dirp->d_name[0] == '.' && (!dirp->d_name[1] ||
+				(dirp->d_name[1] == '.' && !dirp->d_name[2])))
+			continue;
+		if (strncmp(dirp->d_name, base, blen))
+			continue;
+		if (!n++) {
+			sbufn_str(lst, dirp->d_name)
+			mlen = lst->s_n;
+		} else {
+			for (i = 0; i < mlen && lst->s[i] == dirp->d_name[i]; i++);
+			mlen = i;
+			sbuf_chr(lst, ' ')
+			sbufn_str(lst, dirp->d_name)
+		}
+	}
+	closedir(dp);
+	if (n) {
+		sbuf_mem(sb, lst->s + blen, mlen - blen)
+		if (n == 1) {
+			sbufn_str(path, lst->s)
+			if (!stat(path->s, &st) && S_ISDIR(st.st_mode))
+				sbuf_chr(sb, '/')
+		}
+		sbuf_nul4(sb)
+	}
+	free(path->s);
+	return n;
+}
+
+/* clear the screen and list lst from column beg, below the top row,
+wrapped at word boundaries; returns the first column left out */
+static int led_complist(sbuf *lst, int beg)
+{
+	ren_state *rp;
+	int i, r, end, tot;
+	preserve(int, xhl, xhl = 0;)
+	term_clean();
+	rstate = rstates+2;
+	rstate->s = NULL;
+	rp = ren_position(lst->s);
+	tot = rp->pos[rp->n];
+	for (r = 1; r < xrows && beg < tot; r++) {
+		end = beg + xcols;
+		if (end < tot) {
+			for (i = end; i > beg; i--)
+				if (*rp->chrs[rp->col[i]] == ' ') {
+					end = i;
+					break;
+				}
+		} else
+			end = tot;
+		led_crender(lst->s, r, 0, beg, end)
+		for (beg = end; beg < tot && *rp->chrs[rp->col[beg]] == ' '; beg++);
+	}
+	rstate->s = NULL;
+	rstate = rstates;
+	restore(xhl)
+	return beg < tot ? beg : 0;
+}
+
 static void led_printparts(sbuf *sb, int pre, int ps,
 	char *post, int postn, int *poff)
 {
@@ -424,7 +512,7 @@ char *led_read(int *kmap, int c)
 	return NULL;
 }
 
-#define led_info(buf) \
+#define _led_info(buf, pn) \
 { \
 	int ola[3]; \
 	led_ext *la; \
@@ -435,13 +523,17 @@ char *led_read(int *kmap, int c)
 	la->usr = ola; \
 	la->blen = sizeof(ola); \
 	sbuf_str(sb, buf) \
-	led_printparts(sb, pre, ps, *post, postn, poff); \
+	led_printparts(sb, pre, ps, *post, pn, poff); \
 	sbuf_cut(sb, len) \
 	led_extdel(la); \
 	c = term_read(TK_CTL('l')); \
 	led_printparts(sb, pre, ps, *post, postn, poff); \
 	goto noredraw; \
 } \
+
+#define led_info(buf) _led_info(buf, postn)
+/* like led_info(), except the cursor is left where it was, in front of buf */
+#define led_infoc(buf) _led_info(buf, postn + uc_slen(buf))
 
 static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 {
@@ -505,11 +597,6 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 		c = term_read(TK_CTL('l'));
 		noredraw:
 		switch (c) {
-		case TK_CTL('i'):	/* the caller steps the search match */
-		case TK_CTL('_'):
-			if (!(flg & 2))
-				goto insert;
-			break;
 		case TK_CTL('h'):
 			c = 127;
 		case 127:
@@ -729,10 +816,38 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 				exbuf_load(ex_buf)
 			}
 			continue; }
+		case TK_CTL('_'):       /* list the matches on their own screen */
+		case '\t':
+			if (flg & 2)    /* the caller steps the search match */
+				break;
+			if (xtc && ai_max < 0 && sb->s[ps] == ':') {
+				int typed, full = c == TK_CTL('_') || xtc > 1;
+				if (!compsb)
+					sbuf_make(compsb, 128)
+				sbuf_cut(compsb, 0)
+				i = led_pathcomp(sb, pre, compsb, &typed);
+				if (i > 1 && sb->s_n == len) {
+					int page = 0;
+					if (!full)
+						led_infoc(compsb->s + typed)
+					do {
+						page = led_complist(compsb, page);
+						term_pos(0, 0);
+						led_printparts(sb, pre, ps,
+							*post, postn, poff);
+						c = term_read(TK_CTL('l'));
+					} while (page && (c == '\t' || c == TK_CTL('_')));
+					term_clean();
+					goto noredraw;
+				}
+				if (i)
+					break;
+			}
+			if (c == TK_CTL('_'))
+				continue;
 		default:
 			if (c == '\n' || TK_INT(c))
 				return c;
-			insert:
 			if (c == '\t' && xet) {
 				for (int _l = 0; _l < xsw; _l++)
 					sbuf_chr(sb, ' ')
@@ -822,5 +937,9 @@ void led_done(void)
 	if (suggestsb) {
 		sbuf_free(suggestsb)
 		sbuf_free(acsb)
+	}
+	if (compsb) {
+		sbuf_free(compsb)
+		compsb = NULL;
 	}
 }

@@ -515,6 +515,7 @@ extern int xidt;
 extern int xish;
 extern int xgrp;
 extern int xpac;
+extern int xtc;
 extern int xmpt;
 extern int xpr;
 extern int xlim;
