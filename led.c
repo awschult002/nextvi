@@ -530,13 +530,25 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 		case TK_CTL('t'):
 			cs = sdup(sb->s + ps, sb->s_n - ps);
 			sbuf_cut(sb, ps)
-			sbuf_chr(sb, '\t')
+			if (xet)
+				for (int _k = 0; _k < xsw; _k++)
+					sbuf_chr(sb, ' ')
+			else
+				sbuf_chr(sb, '\t')
 			sbuf_str(sb, cs)
 			free(cs);
-			pre++;
+			pre += xet ? xsw : 1;
 			break;
 		case TK_CTL('d'):
-			if (sb->s[ps] == ' ' || sb->s[ps] == '\t') {
+			if (xet) {
+				int _k;
+				for (_k = 0; _k < xsw && sb->s[ps + _k] == ' '; _k++);
+				if (_k) {
+					memmove(&sb->s[ps], &sb->s[ps + _k], len - ps - _k);
+					sb->s_n -= _k;
+					pre = MAX(ps, pre - _k);
+				}
+			} else if (sb->s[ps] == ' ' || sb->s[ps] == '\t') {
 				memmove(&sb->s[ps], &sb->s[ps+1], len - ps - 1);
 				sb->s_n--;
 				pre -= pre > ps;
@@ -721,7 +733,10 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			if (c == '\n' || TK_INT(c))
 				return c;
 			insert:
-			if ((cs = led_read(kmap, c)))
+			if (c == '\t' && xet) {
+				for (int _l = 0; _l < xsw; _l++)
+					sbuf_chr(sb, ' ')
+			} else if ((cs = led_read(kmap, c)))
 				sbuf_str(sb, cs)
 		}
 		is->sug = NULL;

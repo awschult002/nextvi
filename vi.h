@@ -490,6 +490,9 @@ struct buf {
 	int plen, row, off, top;
 	long mtime;			/* modification time */
 	signed char td;			/* text direction */
+	int et;				/* expandtab - use spaces for indentation */
+	int sw;				/* shiftwidth - indentation step */
+	int ts;				/* tabspace - number of spaces for tab */
 };
 /* ex options */
 extern int xleft;
@@ -506,6 +509,9 @@ extern int xtd;
 extern int xshape;
 extern int xorder;
 extern int xts;
+extern int xet;
+extern int xsw;
+extern int xidt;
 extern int xish;
 extern int xgrp;
 extern int xpac;
@@ -547,12 +553,18 @@ extern struct buf *ex_pbuf;
 	xoff = buf->off; \
 	xtop = buf->top; \
 	xtd = buf->td; \
+	xet = buf->et; \
+	xsw = buf->sw; \
+	xts = buf->ts; \
 
 #define exbuf_save(buf) \
 	buf->row = xrow; \
 	buf->off = xoff; \
 	buf->top = xtop; \
 	buf->td = xtd; \
+	buf->et = xet; \
+	buf->sw = xsw; \
+	buf->ts = xts; \
 
 #define bufs_switchwft(idx) \
 { if (&bufs[idx] != ex_buf) { bufs_switch(idx); syn_setft(xb_ft); } } \

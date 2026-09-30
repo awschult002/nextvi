@@ -12,6 +12,9 @@ int xtd = +1;			/* current text direction */
 int xshape = 1;			/* perform letter shaping */
 int xorder = 1;			/* change the order of characters */
 int xts = 8;			/* number of spaces for tab */
+int xet;			/* expandtab - use spaces for indentation */
+int xsw = 8;			/* shiftwidth - indentation step */
+int xidt = 500;			/* auto-detect indent on file open */
 int xish;			/* interactive shell */
 int xgrp;			/* regex search group */
 int xpac;			/* print autocomplete options */
@@ -167,6 +170,9 @@ static int bufs_open(const char *path, int len)
 	bufs[i].off = 0;
 	bufs[i].top = 0;
 	bufs[i].td = +1;
+	bufs[i].et = 0;
+	bufs[i].sw = 8;
+	bufs[i].ts = 8;
 	bufs[i].mtime = -1;
 	return i;
 }
@@ -180,6 +186,9 @@ void temp_open(int i, char *name, char *ft)
 	tempbufs[i].off = 0;
 	tempbufs[i].top = 0;
 	tempbufs[i].td = +1;
+	tempbufs[i].et = 0;
+	tempbufs[i].sw = 8;
+	tempbufs[i].ts = 8;
 	tempbufs[i].mtime = -1;
 	tempbufs[i].ft = ft;
 }
@@ -414,6 +423,51 @@ int ex_edit(const char *path, int len)
 	bufs_switch(bufs_open(path, len));
 	readfile()
 	return 0;
+}
+
+static void ex_detect_indent(struct buf *p)
+{
+	int n = lbuf_len(p->lb);
+	int max = n < xidt ? n : xidt;
+	int tab_lines = 0, space_lines = 0;
+	int prev = 0;			/* previous line's leading spaces */
+	int delta[129];			/* delta[k] = times indent jumped by k */
+	memset(delta, 0, sizeof(delta));
+	for (int i = 0; i < max; i++) {
+		char *ln = lbuf_get(p->lb, i);
+		if (!ln)
+			break;
+		int tabs = 0, spaces = 0;
+		char *s = ln;
+		for (; *s == ' ' || *s == '\t'; s++)
+			*s == '\t' ? tabs++ : spaces++;
+		if (*s == '\n' || *s == '\0')	/* blank line: skip, keep prev */
+			continue;
+		if (tabs && !spaces) {
+			tab_lines++;
+		} else if (spaces) {
+			space_lines++;
+			int d = spaces - prev;
+			if (d > 0 && d <= 128)
+				delta[d]++;
+			prev = spaces;
+		} else
+			prev = 0;		/* dedent to column 0 */
+	}
+	if (tab_lines > space_lines) {
+		p->et = xet = 0;
+	} else if (space_lines > 0) {
+		int best = 0, bestn = 0;
+		for (int d = 1; d <= 128; d++)
+			if (delta[d] > bestn) {
+				bestn = delta[d];
+				best = d;
+			}
+		if (best) {
+			p->et = xet = 1;
+			p->sw = xsw = best;
+		}
+	}
 }
 
 static void *ec_edit(char *loc, char *cmd, char *arg)
@@ -674,6 +728,8 @@ void ex_bufpostfix(struct buf *p, int clear)
 	p->mtime = mtime(p->path);
 	p->ft = syn_filetype(p->path);
 	lbuf_saved(p->lb, clear);
+	if (xidt)
+		ex_detect_indent(p);
 }
 
 static void *ec_setpath(char *loc, char *cmd, char *arg)
@@ -1709,8 +1765,10 @@ static void *eo_##opt(char *loc, char *cmd, char *arg) { inner }
 EO(pac) EO(pr) EO(ai) EO(err) EO(fr) EO(ish) EO(ic) EO(mpt)
 EO(rr) EO(shape) EO(seq) EO(order) EO(hll) EO(hlw)
 EO(hlp) EO(hl) EO(lim) EO(led) EO(vis)
+EO(et) EO(idt)
 
 _EO(ts, xts = *arg ? eo_val(arg) : !xts; xts = MAX(0, xts); RST_NULL(0, 1, 2) return NULL;)
+_EO(sw, if (*arg) xsw = eo_val(arg); return NULL;)
 _EO(td, xtd = *arg ? eo_val(arg) : !xtd; RST_NULL(0, 1) return NULL;)
 _EO(grp, xgrp = (*arg ? eo_val(arg) : !xgrp) * 2; xgrp = MAX(0, xgrp); return NULL;)
 
@@ -1795,6 +1853,7 @@ static struct excmd {
 	EO(err),
 	{"ef!", ec_fuzz},
 	{"ef", ec_fuzz},
+	EO(et),
 	{"e!", ec_edit},
 	{"e", ec_edit},
 	{"ft", ec_ft},
@@ -1806,6 +1865,7 @@ static struct excmd {
 	{"f>", ec_find},
 	{"f<", ec_find},
 	{"f", ec_fuzz},
+	EO(idt),
 	EO(ish),
 	{"inc", ec_setincl},
 	EO(ic),
@@ -1837,6 +1897,7 @@ static struct excmd {
 	EO(seq),
 	{"sc!", ec_specials},
 	{"sc", ec_specials},
+	EO(sw),
 	{"s", ec_substitute},
 	{"x!", ec_write},
 	{"x", ec_write},

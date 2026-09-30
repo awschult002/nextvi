@@ -1210,9 +1210,19 @@ static void vi_shift(int r1, int r2, int dir, int count)
 			if (dir < 0) {
 				if (*ln != ' ' && *ln != '\t')
 					break;
-				ln++;
-			} else if (*ln != '\n' || r1 == r2)
-				sbuf_chr(sb, '\t')
+				if (xet && *ln == ' ') {
+					int k;
+					for (k = 0; k < xsw && *ln == ' '; k++)
+						ln++;
+				} else
+					ln++;
+			} else if (*ln != '\n' || r1 == r2) {
+				if (xet) {
+					for (int k = 0; k < xsw; k++)
+						sbuf_chr(sb, ' ')
+				} else
+					sbuf_chr(sb, '\t')
+			}
 		}
 		sbufn_str(sb, ln)
 		lbuf_edit(xb, sb->s, i, i + 1, 0, 0);
