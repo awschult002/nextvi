@@ -1,3 +1,15 @@
+/**
+ * @file uc.c
+ * @brief UTF-8 helpers: sequence lengths, char/byte offsets, character
+ * classes and display widths, and Arabic contextual shaping.
+ * "Fat nulled" strings end in 4 NUL bytes so a truncated sequence cannot
+ * read past the buffer.
+ */
+
+/** Length of the UTF-8 sequence starting with a byte (0 for NUL, which
+ * ends the loops). `:uc` toggles between this and byte mode (all non-NUL
+ * entries 1; tested as utf8_length[0xc0] == 1). re_pikevm() temporarily
+ * sets the '\n' entry to 0. */
 unsigned char utf8_length[256] = {
 	/*	0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F */
 	/* 0 */ 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -18,7 +30,7 @@ unsigned char utf8_length[256] = {
 	/* F */ 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1
 };
 
-/* the number of utf-8 characters in a fat nulled s */
+/** @brief The number of utf-8 characters in a fat nulled s. */
 int uc_slen(char *s)
 {
 	int n = 0, l;
@@ -27,7 +39,7 @@ int uc_slen(char *s)
 	return n;
 }
 
-/* find the beginning of the character at s[i] */
+/** @brief Step back from s to the first byte of its character (not before beg). */
 char *uc_beg(char *beg, char *s)
 {
 	if (utf8_length[0xc0] == 1)
@@ -36,6 +48,13 @@ char *uc_beg(char *beg, char *s)
 	return s;
 }
 
+/**
+ * @brief Return a pointer to character off of s, or to its end if shorter.
+ * @param s    string, may be NULL
+ * @param off  character index
+ * @param n  receives the number of characters walked (off, or the length)
+ * @return "" if s is NULL
+ */
 char *uc_chrn(char *s, int off, int *n)
 {
 	int l;
@@ -50,7 +69,7 @@ char *uc_chrn(char *s, int off, int *n)
 	return s;
 }
 
-/* the number of characters between s and s + off */
+/** @brief The number of characters in the first off bytes of s. */
 int uc_off(char *s, int off)
 {
 	char *e = s + off;
@@ -60,6 +79,12 @@ int uc_off(char *s, int off)
 	return i;
 }
 
+/**
+ * @brief Return a fat nulled malloc'd copy of characters [beg, end) of s.
+ * @param s        string
+ * @param beg,end  character range
+ * @param rlen  receives its length in bytes
+ */
 char *uc_subl(char *s, int beg, int end, int *rlen)
 {
 	char *sbeg = uc_chr(s, beg);
@@ -72,6 +97,7 @@ char *uc_subl(char *s, int beg, int end, int *rlen)
 	return r;
 }
 
+/** @brief strdup() using emalloc(). */
 char *uc_dup(const char *s)
 {
 	int n = strlen(s) + 1;
@@ -79,6 +105,7 @@ char *uc_dup(const char *s)
 	return memcpy(r, s, n);
 }
 
+/** @brief Character class for word motions: 0 blank, 1 word (alnum, '_', non-ASCII), 2 punctuation. */
 int uc_kind(char *c)
 {
 	if (uc_isspace(*c))
@@ -88,6 +115,7 @@ int uc_kind(char *c)
 	return 2;
 }
 
+/* codepoints in the Arabic, ZWNJ/ZWJ and presentation-form blocks */
 #define UC_R2L(ch)	(((ch) & 0xff00) == 0x0600 || \
 			((ch) & 0xfffc) == 0x200c || \
 			((ch) & 0xff00) == 0xfb00 || \
@@ -96,11 +124,11 @@ int uc_kind(char *c)
 
 /* sorted list of characters that can be shaped */
 static struct achar {
-	unsigned int c;		/* utf-8 code */
-	unsigned int s;		/* single form */
-	unsigned int i;		/* initial form */
-	unsigned int m;		/* medial form */
-	unsigned int f;		/* final form */
+	unsigned int c;	///< Unicode codepoint
+	unsigned int s;	///< isolated form
+	unsigned int i;	///< initial form
+	unsigned int m;	///< medial form
+	unsigned int f;	///< final form
 } achars[] = {
 	{0x0621, 0xfe80},				/* hamza */
 	{0x0622, 0xfe81, 0, 0, 0xfe82},			/* alef madda */
@@ -149,6 +177,7 @@ static struct achar {
 	{0x200d, 0, 0x200d, 0x200d},			/* ZWJ */
 };
 
+/** @brief Binary search achars[] for c; NULL if it has no forms. */
 static struct achar *find_achar(unsigned int c)
 {
 	int h, m, l;
@@ -167,6 +196,7 @@ static struct achar *find_achar(unsigned int c)
 	return NULL;
 }
 
+/** @brief Whether c1 followed by c2 join: c1 has an initial or medial form, c2 a final or medial one. */
 static int can_join(int c1, int c2)
 {
 	struct achar *a1 = find_achar(c1);
@@ -174,6 +204,7 @@ static int can_join(int c1, int c2)
 	return a1 && a2 && (a1->i || a1->m) && (a2->f || a2->m);
 }
 
+/** @brief The presentation form of cur given its neighbours (cur if none). */
 static int uc_cshape(int cur, int prev, int next)
 {
 	int c = cur;
@@ -195,7 +226,7 @@ static int uc_cshape(int cur, int prev, int next)
 }
 
 /*
- * return nonzero for Arabic combining characters
+ * @brief Return nonzero for Arabic combining characters.
  *
  * The standard Arabic diacritics:
  * + 0x064b: fathatan
@@ -218,6 +249,7 @@ int uc_acomb(int c)
 		c == 0x0670;				/* superscript alef */
 }
 
+/** @brief Encode codepoint c as NUL terminated UTF-8 at d. */
 static void uc_cput(char *d, int c)
 {
 	int l = 0;
@@ -238,7 +270,12 @@ static void uc_cput(char *d, int c)
 	*d = '\0';
 }
 
-/* shape the given arabic character; returns a static buffer */
+/**
+ * @brief Shape the Arabic character c at s; returns a static buffer.
+ * The neighbours are the nearest non-combining characters before s (not
+ * before beg) and after it.
+ * @return the UTF-8 form, NULL if c is not right-to-left
+ */
 char *uc_shape(char *beg, char *s, int c)
 {
 	static char out[16];
@@ -268,6 +305,7 @@ char *uc_shape(char *beg, char *s, int c)
 	return out;
 }
 
+/** Sorted {first, last} ranges of double-width codepoints. */
 static int dwchars[][2] = {
 	{0x1100, 0x115F}, {0x231A, 0x231B}, {0x2329, 0x2329}, {0x232A, 0x232A},
 	{0x23E9, 0x23EC}, {0x23F0, 0x23F0}, {0x23F3, 0x23F3}, {0x25FD, 0x25FE},
@@ -343,6 +381,7 @@ static int dwchars[][2] = {
 	{0x31350, 0x323AF}, {0x323B0, 0x3FFFD},
 };
 
+/** Sorted {first, last} ranges of zero-width and combining codepoints. */
 static int zwchars[][2] = {
 	{0xAD, 0xAD}, {0x300, 0x36F}, {0x483, 0x489}, {0x591, 0x5BD},
 	{0x5BF, 0x5BF}, {0x5C1, 0x5C2}, {0x5C4, 0x5C5}, {0x5C7, 0x5C7},
@@ -435,9 +474,10 @@ static int zwchars[][2] = {
 	{0x1E2AE, 0x1E2AE}, {0x1E2EC, 0x1E2EF}, {0x1E4EC, 0x1E4EF}, {0x1E8D0, 0x1E8D6},
 	{0x1E944, 0x1E94A}, {0xE0001, 0xE0001}, {0xE0020, 0xE007F},
 };
-int zwlen = LEN(zwchars);
-int def_zwlen = LEN(zwchars);
+int zwlen = LEN(zwchars);	///< entries of zwchars used by uc_isbell(); `:uz` toggles 0/def_zwlen (0: zero-width chars take no column)
+int def_zwlen = LEN(zwchars);	///< full length of zwchars
 
+/** Sorted {first, last} ranges of non-printable codepoints. */
 static int bchars[][2] = {
 	{0x00000, 0x0001f}, {0x00080, 0x0009f}, {0x00300, 0x0036f},
 	{0x00379, 0x00379}, {0x00380, 0x00383}, {0x0038d, 0x0038d},
@@ -573,9 +613,10 @@ static int bchars[][2] = {
 	{0x1f233, 0x1f23f}, {0x1f24a, 0x1ffff}, {0x2a6d8, 0x2a6ff},
 	{0x2b736, 0x2f7ff}, {0x2fa1f, 0x10ffff},
 };
-int bclen = LEN(bchars);
-int def_bclen = LEN(bchars);
+int bclen = LEN(bchars);	///< entries of bchars used by uc_isbell(); `:ub` toggles 0/def_bclen
+int def_bclen = LEN(bchars);	///< full length of bchars
 
+/** @brief Binary search: whether c is in one of the n sorted ranges of tab. */
 static int find(int c, int tab[][2], int n)
 {
 	if (c < tab[0][0] || !n)
@@ -594,19 +635,22 @@ static int find(int c, int tab[][2], int n)
 	return 0;
 }
 
-/* double-width characters */
+/** @brief Whether c is double-width. */
 static int uc_isdw(int c)
 {
 	return find(c, dwchars, LEN(dwchars));
 }
 
-/* (nonprintable) zero width & combining characters */
+/** @brief Whether c is shown as a placeholder: (nonprintable) zero width & combining characters, if enabled. */
 int uc_isbell(int c)
 {
 	return find(c, zwchars, zwlen) || find(c, bchars, bclen);
 }
 
-/* printing width */
+/**
+ * @brief Printing width: 2 for double-width, else 1; zero-width characters
+ * get 0 only when zwlen is 0 (otherwise they are drawn as a placeholder).
+ */
 int uc_wid(int c)
 {
 	if (uc_isdw(c))
