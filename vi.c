@@ -22,6 +22,7 @@
 #include "ren.c"
 #include "term.c"
 #include "uc.c"
+#include "lsp.c"
 
 int vi_hidch;			/* show hidden chars */
 int vi_lncol;			/* line numbers cursor offset */
@@ -57,6 +58,8 @@ static void vi_drawmsg(char *msg)
 }
 #define vi_drawmsg_mpt(msg) { vi_drawmsg(msg); if (!xmpt) xmpt = 1; }
 
+void lsp_show_msg(char *msg) { vi_drawmsg_mpt(msg) }
+
 static int vi_nextcol(char *ln, int dir, int *off)
 {
 	int o = ren_off(ln, ren_next(ln, ren_pos(ln, *off), dir));
@@ -80,8 +83,32 @@ for (i = 0, ret = 0;; i++) { \
 	ret = func; \
 } } \
 
+/* render an lsp diagnostic as virtual text starting at screen column col */
+static void vi_drawdiag(const char *diag, int sev, int r, int col)
+{
+	static const char *sevname[] = {"info", "error", "warning", "info", "hint"};
+	if (col < 0 || col >= xcols)
+		return;
+	sbuf_smake(sb, 256)
+	sbuf_str(sb, "  ")
+	sbuf_str(sb, sevname[sev > 0 && sev < 5 ? sev : 1])
+	sbuf_str(sb, ": ")
+	sbuf_str(sb, diag)
+	sbuf_chr(sb, '\n')
+	sbuf_nul(sb)
+	preserve(int, syn_blockhl, syn_blockhl = -1;)
+	preserve(int, ftidx,)
+	syn_setft(lsp_ft);
+	RST(2, led_prender(sb->s, r, col, 0, xcols - col))
+	restore(syn_blockhl)
+	restore(ftidx)
+	free(sb->s);
+}
+
 static void vi_drawrow(int row)
 {
+	const char *diag = NULL;
+	int dsev = 1;
 	int l1, i, i1, lnnum = vi_lnnum;
 	char *c, *s;
 	static char ch[5] = "~";
@@ -125,6 +152,8 @@ static void vi_drawrow(int row)
 		return;
 	}
 	s = lbuf_get(xb, row);
+	if (s && xb_path && xb_path[0])
+		diag = lsp_diag_for_line(xb_path, row, &dsev);
 	skip:
 	rstate += row != xrow;
 	if (!s)
@@ -149,6 +178,7 @@ static void vi_drawrow(int row)
 		memset(c, ' ', l1 - (c - tmp));
 		c[l1 - (c - tmp)] = '\0';
 		led_crender(s, row - xtop, l1, xleft, xleft + xcols - l1)
+		int dcol = l1 + rstate->cmax - xleft;
 		preserve(int, syn_blockhl, syn_blockhl = -1;)
 		preserve(int, ftidx,)
 		syn_setft(nn_ft);
@@ -165,10 +195,15 @@ static void vi_drawrow(int row)
 		RST(2, led_prender(tmp, row - xtop, 0, 0, l1))
 		restore(syn_blockhl)
 		restore(ftidx)
+		if (diag)
+			vi_drawdiag(diag, dsev, row - xtop, dcol);
 		return;
 	}
 	led_crender(s, row - xtop, 0, xleft, xleft + xcols)
+	int dcol = rstate->cmax - xleft;
 	rstate = rstates;
+	if (diag)
+		vi_drawdiag(diag, dsev, row - xtop, dcol);
 }
 
 /* redraw the screen */
@@ -1139,7 +1174,9 @@ void vi(int init)
 		int oleft = xleft;
 		ticmd_pos = 0;
 		vi_mod = 0;
+		lsp_wake = 1;
 		vi_ybuf = vi_yankbuf(TK_CTL('l'));
+		lsp_wake = 0;
 		vi_arg = vi_prefix();
 		term_dec()
 		if (vi_lnnum == 1) {
@@ -1600,8 +1637,18 @@ void vi(int init)
 					ex_command(cmd)
 					restore(xled)
 					vi_mod |= 1;
-				} else if (k == '~' || k == 'u' || k == 'U')
+				} else if (k == '~' || k == 'u' || k == 'U') {
 					vc_motion(k);
+				} else if (k == 'K') {
+					if (xb_path && xb_path[0])
+						lsp_hover(xb_path, xrow, xoff);
+				} else if (k == 'd') {
+					if (xb_path && xb_path[0]) {
+						lsp_definition(xb_path, xrow, xoff);
+						vc_status(0);
+						vi_mod |= 1;
+					}
+				}
 				break;
 			case 'x':
 				term_push("d ", 2);
@@ -1691,6 +1738,8 @@ void vi(int init)
 				vc_status(0);
 				vi_mod |= 1;
 				break;
+			case 0:	/* lsp_wake yield; redraw via lsp_dirty */
+				break;
 			default:
 				continue;
 			}
@@ -1756,6 +1805,12 @@ void vi(int init)
 					vi_mod |= row1 == row && orow == xrow ? 2 : 1;
 				}
 			}
+		}
+		if (xb_path && xb_path[0])
+			lsp_sync(xb_path, xb);
+		if (lsp_dirty) {
+			lsp_dirty = 0;
+			vi_mod |= 1;
 		}
 		term_record = 1;
 		if (vi_mod & 1 || xleft != oleft

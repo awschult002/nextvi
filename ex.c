@@ -437,6 +437,8 @@ static void *ec_edit(char *loc, char *cmd, char *arg)
 	if (cd == 3 || (!rd && fd >= 0)) {
 		ex_bufpostfix(ex_buf, arg[0]);
 		syn_setft(xb_ft);
+		if (*xb_path && xb_ft)
+			lsp_open(xb_path, xb_ft);
 	}
 	snprintf(msg, sizeof(msg), "\"%s\" %dL [%c]",
 			*xb_path ? xb_path : "unnamed", lbuf_len(xb),
@@ -809,6 +811,8 @@ static void *ec_write(char *loc, char *cmd, char *arg)
 		ec_setpath(NULL, NULL, path);
 	lbuf_saved(xb, 0);
 	ex_buf->mtime = mtime(path);
+	if (*xb_path)
+		lsp_save(xb_path);
 	xquit = quit;
 	return NULL;
 }
@@ -1730,6 +1734,34 @@ _EO(left,
 	return NULL;
 )
 
+/* :lsp			list the registered servers
+ * :lsp <filetype> <cmd>	run <cmd> as the language server of <filetype> */
+static void *ec_lsp(char *loc, char *cmd, char *arg)
+{
+	char ft[32];
+	int n = 0;
+	while (*arg == ' ' || *arg == '\t')
+		arg++;
+	if (!*arg) {
+		lsp_list();
+		return NULL;
+	}
+	while (arg[n] && arg[n] != ' ' && arg[n] != '\t') {
+		if (n >= (int)sizeof(ft) - 1)
+			return "lsp: filetype too long";
+		ft[n] = arg[n];
+		n++;
+	}
+	ft[n] = '\0';
+	while (arg[n] == ' ' || arg[n] == '\t')
+		n++;
+	if (!arg[n])
+		return "lsp: missing server command";
+	lsp_register(ft, arg + n);
+	lsp_dirty = 1;
+	return NULL;
+}
+
 #undef EO
 #define EO(opt) {#opt, eo_##opt}
 
@@ -1827,6 +1859,7 @@ static struct excmd {
 	EO(left),
 	EO(lim),
 	EO(led),
+	{"lsp", ec_lsp},
 	EO(vis),
 	{"", ec_print}, /* do not remove */
 	{"", ec_print}, /* do not remove */

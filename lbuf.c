@@ -135,6 +135,7 @@ static int lbuf_replace(struct lbuf *lb, sbuf *sb, char *s, struct lopt *lo, int
 			(lb->ln_n - pos - n_del) * sizeof(lb->ln[0]));
 	}
 	lb->ln_n += n_ins - n_del;
+	lb->edseq++;
 	for (i = 0; i < n_ins; i++)
 		lb->ln[pos + i] = *((char**)sb->s + i);
 	for (i = 0; i < lb->mark_n; i++) {	/* updating marks */

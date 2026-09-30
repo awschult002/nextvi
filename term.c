@@ -141,7 +141,8 @@ void term_push(char *s, unsigned int n)
 
 int term_read(int winch)
 {
-	int cw;
+	static struct pollfd ufd[1 + LSP_NFDS_MAX];
+	int cw, i, nfds;
 	if (tibuf_pos >= tibuf_cnt) {
 		if (texec) {
 			xquit = !xquit ? 1 : xquit;
@@ -154,24 +155,50 @@ int term_read(int winch)
 		}
 		cw = 0;
 		re:
-		/* read a single input character */
-		if (xquit < 0 || poll(&term_ufd, 1, -1) <= 0 ||
-				read(term_ufd.fd, tibuf, 1) <= 0) {
-			xquit = !isatty(term_ufd.fd) ? -1 : xquit;
-			if (term_winch && winch && xquit >= 0) {
-				*tibuf = winch;
-				goto ret;
-			} else if (term_winch != cw && !winch && xquit >= 0) {
-				cw = term_winch;
+		ufd[0].fd = term_ufd.fd;
+		ufd[0].events = POLLIN;
+		/* the count is kept: servicing an fd below may unregister it */
+		for (i = 0, nfds = lsp_nfds; i < nfds; i++) {
+			ufd[i+1].fd = lsp_fds[i];
+			ufd[i+1].events = POLLIN;
+		}
+		/* read a single input character, servicing lsp fds */
+		if (xquit >= 0 && poll(ufd, 1 + nfds, -1) > 0) {
+			/* POLLHUP too: a server that died must be reaped here,
+			 * else its fd stays in the set and poll() never blocks */
+			for (i = 0; i < nfds; i++)
+				if (ufd[i+1].revents & (POLLIN | POLLHUP | POLLERR))
+					lsp_process_fd(ufd[i+1].fd);
+			/* only POLLIN yields input; on POLLHUP the read below
+			 * fails and the usual end of input handling takes over */
+			if (!(ufd[0].revents & (POLLIN | POLLHUP | POLLERR))) {
+				if (term_winch && winch) {
+					*tibuf = winch;
+					goto ret;
+				}
+				if (lsp_dirty && lsp_wake)
+					goto err;	/* yield so vi redraws diagnostics */
 				goto re;
 			}
-			err:
-			*tibuf = 0;
-		} else if (xrr > 0) {
-			static char buf[2];
-			buf[0] = *tibuf;
-			ex_regput(xrr, buf, 1);
+			if (read(term_ufd.fd, tibuf, 1) > 0) {
+				if (xrr > 0) {
+					static char buf[2];
+					buf[0] = *tibuf;
+					ex_regput(xrr, buf, 1);
+				}
+				goto ret;
+			}
 		}
+		xquit = !isatty(term_ufd.fd) ? -1 : xquit;
+		if (term_winch && winch && xquit >= 0) {
+			*tibuf = winch;
+			goto ret;
+		} else if (term_winch != cw && !winch && xquit >= 0) {
+			cw = term_winch;
+			goto re;
+		}
+		err:
+		*tibuf = 0;
 		ret:
 		tibuf_cnt = 1;
 		tibuf_pos = 0;

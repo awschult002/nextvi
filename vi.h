@@ -192,6 +192,7 @@ struct lbuf {
 	int hist_sz;			/* size of hist[] */
 	int hist_n;			/* current history head in hist[] */
 	int hist_u;			/* current undo head in hist[] */
+	int edseq;			/* monotonic content mutation counter */
 };
 #define lbuf_len(lb) lb->ln_n
 #define lbuf_s(ln) ((struct linfo*)(ln - sizeof(struct linfo)))
@@ -620,3 +621,20 @@ extern int vi_lncol;
 /* filesystem */
 extern rset *fsincl;
 void dir_calc(char *path);
+
+/* lsp.c */
+#define LSP_NFDS_MAX	8
+extern int lsp_nfds;
+extern int lsp_dirty;
+extern int lsp_wake;
+extern int lsp_fds[LSP_NFDS_MAX];
+void lsp_process_fd(int fd);
+void lsp_register(const char *ft, const char *cmd);
+void lsp_open(const char *path, const char *ft);
+void lsp_save(const char *path);
+void lsp_sync(const char *path, struct lbuf *lb);
+void lsp_hover(const char *path, int row, int off);
+void lsp_definition(const char *path, int row, int off);
+const char *lsp_diag_for_line(const char *path, int line, int *sev);
+void lsp_list(void);
+void lsp_show_msg(char *msg);
