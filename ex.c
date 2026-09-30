@@ -2013,7 +2013,7 @@ static void *eo_##opt(char *loc, char *cmd, char *arg) { inner }
 
 EO(pac) EO(pr) EO(ai) EO(aspec) EO(err) EO(fr) EO(ish) EO(ic) EO(mpt)
 EO(rr) EO(shape) EO(seq) EO(order) EO(hllw) EO(hll) EO(hlw)
-EO(hlp) EO(hl) EO(lim) EO(led) EO(vis) EO(tc)
+EO(hlp) EO(hl) EO(lim) EO(led) EO(vis) EO(tc) EO(ar) EO(gr)
 EO(et) EO(idt)
 
 _EO(ts, xts = *arg ? eo_val(arg) : !xts; xts = MAX(0, xts); RST_NULL(0, 1, 2) return NULL;)
@@ -2028,15 +2028,6 @@ _EO(lw,
 	xleft = 0;
 	xtopsub = 0;
 	RST_NULL(0, 1)
-	return NULL;
-)
-
-_EO(aco,
-	int browse = strchr(cmd, '!') != NULL;
-	int value = *arg ? eo_val(arg) :
-		(xaco && xaco_browse == browse ? 0 : 85000);
-	xaco = MAX(0, value);
-	xaco_browse = browse;
 	return NULL;
 )
 
@@ -2057,6 +2048,15 @@ _EO(left,
 		xleft = atoi(arg);
 	else if (lbuf_get(xb, xrow))
 		xleft = ren_position(lbuf_get(xb, xrow))->pos[MIN(xoff, rstate->n)];
+	return NULL;
+)
+
+_EO(aco,
+	int browse = strchr(cmd, '!') != NULL;
+	int value = *arg ? eo_val(arg) :
+		(xaco && xaco_browse == browse ? 0 : 85000);
+	xaco = MAX(0, value);
+	xaco_browse = browse;
 	return NULL;
 )
 
