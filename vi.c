@@ -457,13 +457,131 @@ static int vi_col2off(struct lbuf *lb, int row, int col)
 	return r->col[col];
 }
 
+/* mark the keyword matches of the visible rows, the one at the
+   cursor is given conf_hlmatc instead of conf_hlmat attributes;
+   the triples are staged in sb, one led_ext extension per row */
+static void vi_isearchhl(sbuf *sb)
+{
+	int offs[xkwdrs->rs ? xkwdrs->rs->nsubc : 2];
+	int cnt[xrows], ola[3];
+	int row, off, beg, end, flg, i, n;
+	char *s;
+	for (row = xtop; row < xtop + xrows && row < lbuf_len(xb); row++) {
+		s = lbuf_get(xb, row);
+		off = 0;
+		flg = REG_NEWLINE;
+		cnt[row - xtop] = 0;
+		while (s[off] && rstr_find(xkwdrs, s + off, offs, flg) >= 0) {
+			flg |= REG_NOTBOL;
+			beg = offs[xgrp], end = offs[xgrp + 1];
+			if (beg < 0) {
+				off += offs[1] > 0 ? offs[1] : 1;
+				continue;
+			}
+			ola[0] = uc_off(s, off + beg);
+			ola[1] = uc_off(s + off + beg, end - beg);
+			ola[2] = row == xrow && ola[0] == xoff ?
+					conf_hlmatc : conf_hlmat;
+			sbuf_mem(sb, ola, sizeof(ola))
+			cnt[row - xtop]++;
+			off += end > 0 ? end : 1;
+		}
+	}
+	/* the ola pointers are stable only now that sb has stopped growing */
+	for (i = 0, n = 0; xtop + i < row; i++) {
+		if (!cnt[i])
+			continue;
+		led_ext *p = led_extnew();
+		p->ln = lbuf_get(xb, xtop + i);
+		p->usr = (int*)sb->s + n;
+		p->blen = cnt[i] * 3 * sizeof(int);
+		n += cnt[i] * 3;
+	}
+}
+
+/* read the search keyword, previewing matches as it is typed;
+   *ret is 0 if the prompt was aborted, 1 if the keyword was
+   accepted and 2 if frow/foff also hold the previewed match */
+static char *vi_isearch(int cmd, int *ret, int *mlen, int *frow, int *foff)
+{
+	int key, row, off, len, sdir, found = 0;
+	int drawn = 0, dir = cmd == '/' ? +2 : -2;
+	int orow = xrow, ooff = xoff, otop = xtop, oleft = xleft;
+	int srow = xrow, soff = xoff, odir = xkwddir;
+	char *okwd = ex_regget('/') ? strdup(ex_regget('/')->s) : NULL;
+	ins_state is;
+	ins_init(is)
+	sbuf_smake(sb, xcols)
+	sbuf_smake(hsb, sizeof(int) * 24)
+	sbuf_chr(sb, cmd)
+	*mlen = sb->s_n;
+	while (1) {
+		term_pos(xrows, 0);
+		syn_setft(vs_ft);
+		len = sb->s_n;
+		key = led_prompt(sb, NULL, &xkmap, &is, *mlen, 2);
+		syn_setft(xb_ft);
+		sbuf_nul(sb)
+		/* an erase key that removed nothing ends an empty prompt */
+		if (key == '\n' || TK_INT(key) || xquit
+				|| (key == 127 && sb->s_n == len))
+			break;
+		if (!xled || (sb->s_n == *mlen && !drawn))
+			continue;
+		/* the step keys search on from the previewed match */
+		if (key == TK_CTL('i') || key == TK_CTL('_'))
+			sdir = key == TK_CTL('i') ? dir / 2 : -dir / 2;
+		else
+			srow = orow, soff = ooff, sdir = dir / 2;
+		xrow = srow, xoff = soff, xtop = otop;
+		led_extcut();
+		sbuf_cut(hsb, 0)
+		if (sb->s_n > *mlen) {
+			row = srow, off = soff;
+			ex_krsset(sb->s + *mlen, dir);
+			if (xkwdrs && xgrp < (xkwdrs->rs ? xkwdrs->rs->nsubc : 2)
+					&& lbuf_len(xb)) {
+				found = !lbuf_search(xb, xkwdrs, sdir, 0, lbuf_len(xb),
+						sdir, 1, &row, &off);
+				if (found)
+					srow = xrow = row, soff = xoff = off;
+				if (xrow < xtop || xrow >= xtop + xrows)
+					xtop = MAX(0, xrow - xrows / 2);
+				vi_isearchhl(hsb);
+			}
+		}
+		term_record = 1;
+		vi_drawagain(xtop);
+		term_commit();
+		drawn = 1;
+	}
+	*ret = key == '\n';
+	if (*ret && sb->s_n > *mlen) {
+		if (found)	/* the step keys may have moved past the first match */
+			*frow = srow, *foff = soff, *ret = 2;
+		lbuf_dedup(tempbufs[0].lb, sb->s + *mlen, sb->s_n - *mlen)
+		temp_pos(0, -1, 0, 0);
+		temp_write(0, sb->s + *mlen);
+	} else if (okwd)	/* the preview must not alter the last keyword */
+		ex_krsset(okwd, *ret ? dir : odir * 2);
+	else if (xkwdrs) {
+		rstr_free(xkwdrs);
+		xkwdrs = NULL;
+	}
+	free(okwd);
+	led_extcut();
+	free(hsb->s);
+	xrow = orow, xoff = ooff, xtop = otop, xleft = oleft;
+	vi_mod |= drawn;
+	return sb->s;
+}
+
 static int vi_search(int cmd, int cnt, int *row, int *off, int msg)
 {
-	int i, dir, ret;
+	int i, dir, ret = 0;
 	char vi_msg[512];
 	if (cmd == '/' || cmd == '?') {
-		char sign[4] = {cmd};
-		char *kw = vi_prompt(sign, vs_ft, NULL, &ret, &xkmap, &i);
+		char *kw = vi_isearch(cmd, &ret, &i, row, off);
 		vi_drawmsg_mpt(kw)
 		if (!ret) {
 			free(kw);
@@ -480,7 +598,7 @@ static int vi_search(int cmd, int cnt, int *row, int *off, int msg)
 		return 1;
 	}
 	dir = cmd == 'N' ? -xkwddir : xkwddir;
-	for (i = 0; i < cnt; i++) {
+	for (i = ret > 1; i < cnt; i++) {
 		if (lbuf_search(xb, xkwdrs, dir, 0, lbuf_len(xb),
 				msg ? dir : -1, 1, row, off)) {
 			if (msg) {

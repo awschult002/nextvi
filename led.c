@@ -505,6 +505,11 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 		c = term_read(TK_CTL('l'));
 		noredraw:
 		switch (c) {
+		case TK_CTL('i'):	/* the caller steps the search match */
+		case TK_CTL('_'):
+			if (!(flg & 2))
+				goto insert;
+			break;
 		case TK_CTL('h'):
 			c = 127;
 		case 127:
@@ -715,6 +720,7 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 		default:
 			if (c == '\n' || TK_INT(c))
 				return c;
+			insert:
 			if ((cs = led_read(kmap, c)))
 				sbuf_str(sb, cs)
 		}

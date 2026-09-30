@@ -624,6 +624,8 @@ extern struct placeholder _ph[];
 extern struct placeholder *ph;
 extern int phlen;
 extern const int conf_hlrev;
+extern const int conf_hlmat;
+extern const int conf_hlmatc;
 char **conf_kmap(int id);
 int conf_kmapfind(char *name);
 char *conf_digraph(int c1, int c2);

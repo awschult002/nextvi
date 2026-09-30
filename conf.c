@@ -338,6 +338,12 @@ const int hloptslen = LEN(hlopts);
 /* how to highlight text in the reverse direction */
 const int conf_hlrev = SYN_BGMK(8);
 
+/* how to highlight the search matches */
+const int conf_hlmat = RE1;
+
+/* how to highlight the search match the cursor lands on */
+const int conf_hlmatc = RE1 | SYN_BGMK(8);
+
 /* right-to-left characters */
 #define CR2L		"ء-يپچژکگی‌-‍؛،»«؟ً-ْٔ"
 /* neutral characters */
