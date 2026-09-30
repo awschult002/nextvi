@@ -65,6 +65,9 @@ static int vi_cndir = 1;		/* ^n direction */
 static int vi_status;			/* permanent status bar */
 static int vi_tsm;			/* type of the status message */
 static int vi_nlmode;			/* new line mode for vi regions */
+static int vi_visual;			/* visual mode: 0=off, 'v'=char, 'V'=line 'b'=block */
+static int vi_vrow;			/* selection anchor row */
+static int vi_voff;			/* selection anchor column */
 
 static void vi_drawmsg(char *msg)
 {
@@ -102,6 +105,141 @@ for (i = 0, ret = 0;; i++) { \
 	tmp[l1] = *snum; \
 	ret = func; \
 } } \
+
+/* first and last screen column of the character at (row, off) */
+static void vi_offspan(int row, int off, int *c1, int *c2)
+{
+	char *ln = lbuf_get(xb, row);
+	ren_state *rs = rstate;
+	*c1 = *c2 = 0;
+	if (!ln)
+		return;
+	rstate = rstates+2;
+	rstate->s = NULL;
+	ren_state *r = ren_position(ln);
+	off = MAX(0, MIN(off, r->n - 1));
+	*c1 = r->pos[off];
+	*c2 = *c1 + r->wid[off] - 1;
+	rstate->s = NULL;	/* scratch slot, lbuf_rfree skips it */
+	rstate = rs;
+}
+
+/* screen columns the block selection spans */
+static void vi_blockcols(int *c1, int *c2)
+{
+	int a1, a2, b1, b2;
+	vi_offspan(vi_vrow, vi_voff, &a1, &a2);
+	vi_offspan(xrow, xoff, &b1, &b2);
+	*c1 = MIN(a1, b1);
+	*c2 = MAX(a2, b2);
+}
+
+/* ansi colours are rgb bit masks (RE 1, GR 2, BL 4; 8 only makes them bright),
+   so the first primary a cell lacks is the one that cannot blend into it */
+static int vi_curhue(int att)
+{
+	static const int hue[] = {GR, RE, BL};	/* in order of preference */
+	int i, bg = SYN_BG(att);
+	int under = bg ? bg : SYN_FG(att);	/* fill, else text colour */
+	for (i = 0; i < LEN(hue); i++)
+		if (!(under & hue[i]))
+			return hue[i];
+	return BL;			/* white: every primary is taken */
+}
+
+/* the cursor cell, which ext_sel leaves out of the reversed run: fill it with
+   the one primary the highlight under the cursor does not already carry */
+static void ext_cursor(led_ext *p, led_ctx *x)
+{
+	if (!led_extkey(p, x))
+		return;
+	int *ola = p->usr;
+	int i = led_attidx(x, ola[0]);
+	if (i < 0)
+		return;
+	int hue = vi_curhue(x->att[i]) + 8;	/* the bright variant */
+	/* a background and only a background: with any flag left on, SYN_RV
+	   would paint the hue as the text colour instead */
+	x->att[i] = SYN_FGSET(x->att[i]) | SYN_BGMK(hue) | ola[2];
+}
+
+/* the selected span of the row: a plain merge under its own name, so that
+   led_extfind() tells it from entries left on the default body */
+static void ext_sel(led_ext *p, led_ctx *x)
+{
+	ext_attmerge(p, x);
+}
+
+/* stage the row's overlays: one entry each, re-pointed per row, so a redraw
+   never grows the registry. both are transient, dropped by led_extcut() */
+static void vi_visual_attrib(char *s, int row)
+{
+	static int sel[6], cur[3];
+	led_ext *p;
+	int cnt = 1;
+	if (!vi_visual || !s)
+		return;
+	int ar = vi_vrow, ao = vi_voff;
+	int cr = xrow,   co = xoff;
+	if (ar > cr || (ar == cr && ao > co)) {
+		swap(&ar, &cr);
+		swap(&ao, &co);
+	}
+	if (row < ar || row > cr)
+		return;
+	int cb = 0, ce = 0;
+	if (vi_visual == 'b')	/* before s is rendered: xlim nulls part of it */
+		vi_blockcols(&cb, &ce);
+	ren_state *r = ren_position(s);
+	int rn1 = r->n - 1;
+	int o_beg, o_end;
+	if (vi_visual == 'V') {
+		o_beg = 0;
+		o_end = rn1;
+	} else if (vi_visual == 'b') {
+		if (cb >= r->cmax)	/* line ends left of the block */
+			return;
+		o_beg = r->col[cb];
+		o_end = ce < r->cmax ? r->col[ce] : rn1 - 1;
+	} else if (ar == cr) {
+		o_beg = ao; o_end = co;
+	} else if (row == ar) {
+		o_beg = ao; o_end = lbuf_eol(xb, row, 1);
+	} else if (row == cr) {
+		o_beg = 0;
+		o_end = co;
+	} else {
+		o_beg = 0;
+		o_end = lbuf_eol(xb, row, 1);
+	}
+	sel[0] = o_beg;
+	sel[1] = o_end - o_beg + 1;
+	sel[2] = SYN_RV;
+	if (row == xrow && xoff >= o_beg && xoff <= o_end) {
+		/* the cursor cell is a hole in the run: it takes a background
+		   instead, which SYN_RV would undo */
+		sel[1] = xoff - o_beg;
+		sel[3] = xoff + 1;
+		sel[4] = o_end - xoff;
+		sel[5] = SYN_RV;
+		cnt = 2;
+	}
+	if (!(p = led_extfind(ext_sel)))
+		(p = led_extnew())->ext_func = ext_sel;
+	p->ln = s;
+	p->usr = sel;
+	p->blen = cnt * 3 * sizeof(int);
+	if (row != xrow)
+		return;
+	cur[0] = xoff;
+	cur[1] = 1;
+	cur[2] = 0;		/* nothing rides on top of the hue */
+	if (!(p = led_extfind(ext_cursor)))	/* pushed last, runs last */
+		(p = led_extnew())->ext_func = ext_cursor;
+	p->ln = s;
+	p->usr = cur;
+	p->blen = sizeof(cur);
+}
 
 /* render an lsp diagnostic as virtual text starting at screen column col */
 static void vi_drawdiag(const char *diag, int sev, int r, int col)
@@ -197,6 +335,7 @@ static void vi_drawrow(int row)
 		vi_lncol = dir_context(s) < 0 ? 0 : l1;
 		memset(c, ' ', l1 - (c - tmp));
 		c[l1 - (c - tmp)] = '\0';
+		vi_visual_attrib(s, row);
 		led_crender(s, row - xtop, l1, xleft, xleft + xcols - l1)
 		int dcol = l1 + rstate->cmax - xleft;
 		preserve(int, syn_blockhl, syn_blockhl = -1;)
@@ -219,6 +358,7 @@ static void vi_drawrow(int row)
 			vi_drawdiag(diag, dsev, row - xtop, dcol);
 		return;
 	}
+	vi_visual_attrib(s, row);
 	led_crender(s, row - xtop, 0, xleft, xleft + xcols)
 	int dcol = rstate->cmax - xleft;
 	rstate = rstates;
@@ -508,20 +648,23 @@ static void vc_status(int type)
 		rstate = rstates+1;
 	col = vi_off2col(xb, xrow, xoff);
 	col = ren_cursor(lbuf_get(xb, xrow), col) + 1;
+	char *vs = vi_visual == 'V' ? "-- VISUAL LINE -- " :
+		   vi_visual == 'b' ? "-- VISUAL BLOCK -- " :
+		   vi_visual ? "-- VISUAL -- " : "";
 	if (type && lbuf_get(xb, xrow)) {
 		c = rstate->chrs[xoff];
 		uc_code(cp, c, l)
 		memcpy(cbuf, c, l);
-		snprintf(vi_msg, sizeof(vi_msg), "<%s> 0x%x 0%o %u %dL %dW S%td O%d C%d",
+		snprintf(vi_msg, sizeof(vi_msg), "<%s> 0x%x 0%o %u %dL %dW S%td O%d C%d %s",
 			cbuf, cp, cp, cp, l, rstate->wid[xoff], c - lbuf_get(xb, xrow),
-			xoff, col);
+			xoff, col, vs);
 	} else {
 		snprintf(vi_msg, sizeof(vi_msg),
-			"\"%s\"%s%dL %d%% L%d C%d B%td",
+			"\"%s\"%s%dL %d%% L%d C%d B%td %s",
 			xb_path[0] ? xb_path : "unnamed",
 			xb->modified ? "* " : " ", lbuf_len(xb),
 			xrow * 100 / MAX(1, lbuf_len(xb)-1), xrow+1, col,
-			istempbuf(ex_buf) ? tempbufs - ex_buf - 1 : ex_buf - bufs);
+			istempbuf(ex_buf) ? tempbufs - ex_buf - 1 : ex_buf - bufs, vs);
 	}
 	if (redraw_thread)
 		rstate = rstates;
@@ -961,6 +1104,184 @@ static void vi_shift(int r1, int r2, int dir, int count)
 	free(sb->s);
 }
 
+static int vc_insert(int cmd);
+
+/* ci is a screen column; each line maps it to its own offset */
+static int vc_block_insert(int vcmd, int r1, int r2, int ci)
+{
+	char *old_ln = lbuf_get(xb, r1);
+	if (!old_ln)
+		return 0;
+	xrow = r1;
+	ren_state *r = ren_position(old_ln);
+	int eol = r->n - 1;			/* offset of '\n' */
+	int old_nbytes = lbuf_s(old_ln)->len;
+	int off = ci < r->cmax ? r->col[ci] : eol;
+	if (vcmd == 'A' && off < eol)
+		off++;
+	int app = off >= eol;			/* inserting at the line end */
+	xoff = app ? MAX(0, eol - 1) : off;
+	int ins_byte = r->chrs[app ? eol : off] - old_ln;
+	int key = vc_insert(app ? 'a' : 'i');
+	char *new_ln = lbuf_get(xb, r1);
+	int new_nbytes = new_ln ? lbuf_s(new_ln)->len : 0;
+	int added = new_nbytes - old_nbytes;
+	if (added <= 0)
+		return key;
+	char *ins_text = new_ln + ins_byte;
+	int added_chars = 0;
+	for (char *t = ins_text; t < ins_text + added; t += uc_len(t))
+		added_chars++;
+	for (int rw = r1 + 1; rw <= r2; rw++) {
+		char *ln = lbuf_get(xb, rw);
+		if (!ln)
+			continue;
+		ren_state *rs = ren_position(ln);
+		int n = rs->n - 1;	/* '\n' index = content chars */
+		int pos = ci < rs->cmax ? rs->col[ci] : n;
+		if (vcmd == 'I') {
+			if (ci > rs->cmax)	/* line too short: skip */
+				continue;
+		} else				/* 'A': after right edge */
+			pos = MIN(pos + 1, n);
+		char *p = uc_chr(ln, pos);
+		char *nl_p = ln + lbuf_s(ln)->len;
+		int pre_bytes = p - ln;
+		int post_bytes = nl_p - p + 1;		/* p through '\n' */
+		char *new_ln2 = emalloc(pre_bytes + added + post_bytes + 1);
+		memcpy(new_ln2, ln, pre_bytes);
+		memcpy(new_ln2 + pre_bytes, ins_text, added);
+		memcpy(new_ln2 + pre_bytes + added, p, post_bytes);
+		new_ln2[pre_bytes + added + post_bytes] = '\0';
+		lbuf_edit(xb, new_ln2, rw, rw + 1, pos, pos + added_chars);
+		free(new_ln2);
+	}
+	vi_mod |= r1 != r2 ? 1 : 2;
+	return key;
+}
+
+/* c_left and c_right are screen columns; map them per line */
+#define VCB_BOUNDS \
+	char *ln = lbuf_get(xb, r); \
+	if (!ln) continue; \
+	ren_state *rs = ren_position(ln); \
+	n = rs->n - 1; \
+	left = c_left < rs->cmax ? rs->col[c_left] : n; \
+	right = c_right < rs->cmax ? rs->col[c_right] : n - 1; \
+	bp = uc_chr(ln, left); \
+	ep = right >= left ? uc_chr(bp, right - left + 1) : bp; \
+	nlp = ln + lbuf_s(ln)->len; \
+	if (ep > nlp) ep = nlp
+
+static int vc_block_op(int cmd, int r1, int r2, int c_left, int c_right)
+{
+	int r, n, left, right;
+	char *bp, *ep, *nlp;
+	if (cmd == 'y' || cmd == 'd' || cmd == 'c') {
+		sbuf_smake(yb, 256)
+		for (r = r1; r <= r2; r++) {
+			VCB_BOUNDS;
+			if (ep > bp)
+				sbuf_mem(yb, bp, (int)(ep - bp))
+			if ((cmd == 'd' || cmd == 'c') && left <= right && n) {
+				int beg_bytes = (int)(bp - ln);
+				int rest_bytes = (int)(nlp - ep + 1);
+				char *new_ln = emalloc(beg_bytes + rest_bytes + 1);
+				memcpy(new_ln, ln, beg_bytes);
+				memcpy(new_ln + beg_bytes, ep, rest_bytes);
+				new_ln[beg_bytes + rest_bytes] = '\0';
+				lbuf_edit(xb, new_ln, r, r + 1, left, left);
+				free(new_ln);
+			}
+			sbuf_chr(yb, '\n')
+		}
+		sbuf_nul(yb)
+		vi_regput(vi_ybuf < 0 ? xdefreg : vi_ybuf, yb->s, 0);
+		free(yb->s);
+		if (cmd == 'd' || cmd == 'c') {
+			xrow = r1;
+			xoff = ren_noeol(lbuf_get(xb, r1),
+					vi_col2off(xb, r1, c_left));
+		}
+		if (cmd == 'c')
+			return vc_block_insert('I', r1, r2, c_left);
+	} else if (cmd == '~' || cmd == 'u' || cmd == 'U') {
+		for (r = r1; r <= r2; r++) {
+			VCB_BOUNDS;
+			if (left > right || !n)
+				continue;
+			int total = lbuf_s(ln)->len + 2;
+			char *new_ln = emalloc(total);
+			memcpy(new_ln, ln, total - 1);
+			new_ln[total - 1] = '\0';
+			char *p = new_ln + (bp - ln);
+			char *pe = new_ln + (ep - ln);
+			while (p < pe) {
+				int ch = (unsigned char)*p;
+				if (ch <= 0x7f) {
+					if (cmd == 'u')
+						*p = (char)tolower(ch);
+					else if (cmd == 'U')
+						*p = (char)toupper(ch);
+					else
+						*p = (char)(islower(ch) ? toupper(ch) : tolower(ch));
+				}
+				p += uc_len(p);
+			}
+			lbuf_edit(xb, new_ln, r, r + 1, left, right + 1);
+			free(new_ln);
+		}
+	} else if (cmd == '>' || cmd == '<')
+		vi_shift(r1, r2, cmd == '>' ? +1 : -1, 1);
+	vi_mod |= r1 != r2 ? 1 : 2;
+	return 0;
+}
+
+static int vc_visual_op(int cmd)
+{
+	int r1 = vi_vrow, o1 = vi_voff;
+	int r2 = xrow, o2 = xoff;
+	if (r1 > r2 || (r1 == r2 && o1 > o2)) {
+		swap(&r1, &r2);
+		swap(&o1, &o2);
+	}
+	int visual = vi_visual;
+	int lnmode = visual == 'V';
+	vi_visual = 0;
+	if (visual == 'b') {
+		int c1, c2;
+		vi_blockcols(&c1, &c2);
+		return vc_block_op(cmd, r1, r2, c1, c2);
+	}
+	if (!lnmode) {
+		/* include the char under the cursor, as vc_motion does */
+		if (o2 < lbuf_eol(xb, r2, 2))
+			o2++;
+		ren_state *r = (ren_state*)lbuf_get(xb, r1);
+		r = r ? ren_position((char*)r) : NULL;
+		o1 = r ? MAX(0, MIN(o1, r->n)) : 0;
+	} else {
+		o1 = 0;
+		o2 = lbuf_eol(xb, r2, r1 >= r2);
+	}
+	int key = 0;
+	int prevlen = lbuf_len(xb);
+	if (cmd == 'y')
+		vi_yank(r1, o1, r2, o2, lnmode);
+	else if (cmd == 'd')
+		vi_delete(r1, o1, r2, o2, lnmode);
+	else if (cmd == 'c')
+		key = vi_change(r1, o1, r2, o2, lnmode);
+	else if (cmd == '~' || cmd == 'u' || cmd == 'U')
+		vi_case(r1, o1, r2, o2, lnmode, cmd);
+	else if (cmd == '!')
+		vi_pipe(r1, r2);
+	else if (cmd == '>' || cmd == '<')
+		vi_shift(r1, r2, cmd == '>' ? +1 : -1, 1);
+	vi_mod |= r1 != r2 || prevlen != lbuf_len(xb) ? 1 : 2;
+	return key;
+}
+
 static int vc_motion(int cmd)
 {
 	int r1 = xrow, r2 = xrow;	/* region rows */
@@ -1308,6 +1629,10 @@ void vi(int init)
 				vi_mod |= 1;
 				break;
 			case 'u':
+				if (vi_visual) {
+					vc_visual_op('u');
+					break;
+				}
 				undo:
 				if (vi_arg >= 0 && !lbuf_undo(xb, &xrow, &xoff)) {
 					vi_mod |= 1;
@@ -1357,6 +1682,10 @@ void vi(int init)
 					vi_lnnum = vi_arg ? vi_lnnum | vi_arg : !vi_lnnum;
 				vi_lncol = 0;
 				vi_mod |= 1;
+				break;
+			case 'U':
+				if (vi_visual)
+					vc_visual_op('U');
 				break;
 			case 'v':
 				vi_mod |= 2;
@@ -1462,6 +1791,26 @@ void vi(int init)
 				vi_mod |= 1;
 				break;
 			case ':':
+				if (vi_visual == 'v' || vi_visual == 'V') {
+					char range[128];
+					int vr1 = MIN(vi_vrow, xrow), vr2 = MAX(vi_vrow, xrow);
+					char *p = itoa(vr1+1, range);
+					*p++ = ',';
+					p = itoa(vr2+1, p);
+					if (vi_visual == 'v') {
+						int o1 = vi_voff, o2 = xoff;
+						if (vi_vrow > xrow ||
+								(vi_vrow == xrow && vi_voff > xoff))
+							swap(&o1, &o2);
+						*p++ = ';';
+						p = itoa(o1, p);
+						*p++ = ';';
+						p = itoa(o2 + 1, p);
+					}
+					*p = '\0';
+					ln = vi_enprompt(":", range, &k, &n);
+					goto do_excmd;
+				}
 				ln = vi_enprompt(":", NULL, &k, &n);
 				do_excmd:
 				if (k && ln[n]) {
@@ -1481,7 +1830,15 @@ void vi(int init)
 					xmpt = 1;
 				break;
 			case 'c':
+				if (vi_visual) {
+					k = vc_visual_op('c');
+					goto insert_done;
+				}
 			case 'd':
+				if (vi_visual) {
+					vc_visual_op('d');
+					break;
+				}
 				k = term_read(0);
 				if (k == 'i') {
 					k = term_read(0);
@@ -1531,6 +1888,10 @@ void vi(int init)
 			case '>':
 			case '<':
 			case TK_CTL('w'):
+				if (vi_visual && c != TK_CTL('w')) {
+					vc_visual_op(c);
+					break;
+				}
 				k = vc_motion(c);
 				if (c == 'c')
 					goto insert_done;
@@ -1541,6 +1902,14 @@ void vi(int init)
 			case 'A':
 			case 'o':
 			case 'O':
+				if (vi_visual == 'b' && (c == 'I' || c == 'A')) {
+					int r1b = MIN(vi_vrow, xrow), r2b = MAX(vi_vrow, xrow);
+					int c_left, c_right;
+					vi_blockcols(&c_left, &c_right);
+					vi_visual = 0;
+					k = vc_block_insert(c, r1b, r2b, c == 'I' ? c_left : c_right);
+					goto insert_done;
+				}
 				insert:
 				k = vc_insert(c);
 				insert_done:
@@ -1664,6 +2033,13 @@ void vi(int init)
 					vi_mod |= 1;
 				} else if (k == '~' || k == 'u' || k == 'U') {
 					vc_motion(k);
+				} else if (k == 'v' || k == 'V' || k == 'b') {
+					if (!vi_visual) {		/* fresh selection */
+						vi_vrow = xrow;
+						vi_voff = xoff;
+					}
+					vi_visual = vi_visual == k ? 0 : k;
+					vi_mod |= 1;
 				} else if (k == 'K') {
 					if (xb_path && xb_path[0])
 						lsp_hover(xb_path, xrow, xoff);
@@ -1688,16 +2064,25 @@ void vi(int init)
 				term_push("yy", 2);
 				goto motion;
 			case '~':
+				if (vi_visual) {
+					vc_visual_op('~');
+					break;
+				}
 				term_push("g~ ", 3);
 				goto motion;
 			case 'C':
-				term_push("c$", 2);
-				goto motion;
 			case 's':
-				term_push("c ", 2);
-				goto motion;
 			case 'S':
-				term_push("cc", 2);
+				if (vi_visual) {
+					k = vc_visual_op('c');
+					goto insert_done;
+				}
+				if (c == 'C')
+					term_push("c$", 2);
+				else if (c == 's')
+					term_push("c ", 2);
+				else
+					term_push("cc", 2);
 				motion:
 				ticmd_pos--;
 				goto re_motion;
@@ -1763,6 +2148,13 @@ void vi(int init)
 				vc_status(0);
 				vi_mod |= 1;
 				break;
+			case TK_ESC:
+				if (vi_visual) {
+					vi_visual = 0;
+					vi_mod |= 1;
+					break;
+				}
+				continue;
 			case 0:	/* lsp_wake yield; redraw via lsp_dirty */
 				break;
 			default:
@@ -1831,6 +2223,8 @@ void vi(int init)
 				}
 			}
 		}
+		if (vi_visual)
+			vi_mod |= 1;
 		if (xb_path && xb_path[0])
 			lsp_sync(xb_path, xb);
 		if (lsp_dirty) {
