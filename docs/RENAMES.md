@@ -83,4 +83,15 @@ Old names from upstream `kyx0r/nextvi` (base `b1c78886`) and their new names. Ge
 
 Notes: `ticmd*` holds the keys kept for `.` repeat. `texec` became `term_exec_type` because `term_exec` is already a function.
 
-File-local statics in `vi.c`, `ren.c` and `led.c` are not renamed yet.
+## Line-number globals (`scripts/renames-vi-lnum.tsv`)
+
+| Old | New | Defined in |
+|---|---|---|
+| `vi_lnnum` | `lnum_mode` | vi.c |
+| `vi_lncol` | `lnum_width` | vi.c |
+| `vi_rshift` | `hint_row_shift` | vi.c |
+| `lnnum` | `lnum_cur` | vi.c |
+
+`lnum_cur` is the local copy in `vi_drawrow`. The bare 1/2/4/8 mode values are now `LN_ONCE`, `LN_ABS`, `LN_INDENT` and `LN_REL`; see `docs/USAGE.md`.
+
+Other file-local statics in `vi.c`, `ren.c` and `led.c` are not renamed yet.
