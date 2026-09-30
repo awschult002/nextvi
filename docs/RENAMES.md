@@ -2,6 +2,11 @@
 
 Old names from upstream `kyx0r/nextvi` (base `b1c78886`) and their new names. Generated from `scripts/renames-globals.tsv`; replay with `scripts/rename.sh` on a fresh upstream.
 
+**Unity build:** `vi.c` `#include`s every other `.c` file, so all globals and file-level statics share one scope. Renames and collision checks therefore always run across the whole tree (`*.c`, `*.h`), and rename commits are built with `-Wshadow` to catch a local that would shadow a new name.
+
+## Globals (`scripts/renames-globals.tsv`)
+
+
 | Old | New | Defined in |
 |---|---|---|
 | `xai` | `opt_autoindent` | ex.c |
@@ -60,4 +65,22 @@ Old names from upstream `kyx0r/nextvi` (base `b1c78886`) and their new names. Ge
 | `xqprop` | `quit_propagate` | ex.c |
 | `xpret` | `ex_prev_ret` | ex.c |
 
-Terminal globals (`xrows`, `xcols`, `tibuf*`, `ticmd*`, `texec*`) and file-local statics are not renamed yet; they follow in the per-file passes.
+## Terminal globals (`scripts/renames-term.tsv`)
+
+| Old | New | Defined in |
+|---|---|---|
+| `xrows` | `term_rows` | term.c |
+| `xcols` | `term_cols` | term.c |
+| `tibuf` | `term_inbuf` | term.c |
+| `tibuf_pos` | `term_inbuf_pos` | term.c |
+| `tibuf_cnt` | `term_inbuf_count` | term.c |
+| `tibuf_sz` | `term_inbuf_size` | term.c |
+| `tibuf_prev` | `term_inbuf_prev` | term.c |
+| `ticmd` | `term_cmd_keys` | term.c |
+| `ticmd_pos` | `term_cmd_keys_pos` | term.c |
+| `texec` | `term_exec_type` | term.c |
+| `texec_n` | `term_exec_pushed` | term.c |
+
+Notes: `ticmd*` holds the keys kept for `.` repeat. `texec` became `term_exec_type` because `term_exec` is already a function.
+
+File-local statics in `vi.c`, `ren.c` and `led.c` are not renamed yet.
