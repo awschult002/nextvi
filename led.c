@@ -411,7 +411,7 @@ static void led_printparts(sbuf *sb, int pre, int ps,
 		return;
 	}
 	int dir, off, pos, psn = sb->s_n;
-	int lncol = poff == &cursor_off ? vi_lncol : 0;
+	int lncol = poff == &cursor_off ? lnum_width : 0;
 	sbuf_str(sb, post)
 	sbuf_nul4(sb)
 	/* XXX: O(n) insertion; recursive array data structure cannot be optimized.
@@ -513,7 +513,7 @@ static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 {
 	rstate++;
 	for (int nl = 0; r < term_rows; r++) {
-		if (vi_lncol) {
+		if (lnum_width) {
 			term_pos(r, 0);
 			term_kill();
 		}
@@ -523,7 +523,7 @@ static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 			sbuf_mem(cb, cs, nl+!!cs[nl])
 			sbuf_nul4(cb)
 			rstate->s = NULL;
-			led_crender(cb->s, r, vi_lncol, opt_left_col, opt_left_col + term_cols - vi_lncol)
+			led_crender(cb->s, r, lnum_width, opt_left_col, opt_left_col + term_cols - lnum_width)
 			free(cb->s);
 			rstate->s = NULL;
 			cs += nl+!!cs[nl];
@@ -531,7 +531,7 @@ static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 		}
 		nl = r < crow-ctop ? r+ctop : (r-(crow-orow+!!(flg & 4)))+ctop;
 		led_crender(lbuf_get(xb, nl) ? lbuf_get(xb, nl) : "~", r,
-			vi_lncol, opt_left_col, opt_left_col + term_cols - vi_lncol)
+			lnum_width, opt_left_col, opt_left_col + term_cols - lnum_width)
 	}
 	term_pos(crow - ctop, 0);
 	rstate--;

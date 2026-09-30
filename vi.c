@@ -32,15 +32,22 @@
 #include "uc.c"
 
 int vi_hidch;	///< show hidden chars (V toggles)
-int vi_lncol;	///< width of the line-number column, added to the cursor column
-static int vi_lnnum;	///< line numbers set by #: 1 both for one command, bit 2 absolute, bit 4 relative (also at the indent), bit 8 relative
+int lnum_width;	///< width of the line-number column, added to the cursor column (was vi_lncol)
+static int lnum_mode;	///< line-number mode set by [count]#: a bitmask of LN_* flags; LN_ONCE alone means "for one command" (was vi_lnnum)
+/** Line-number mode flags for lnum_mode; `[count]#` toggles the flag equal to count, bare `#` = LN_ONCE. */
+enum {
+	LN_ONCE = 1,	///< bare `#`: absolute + relative-at-indent, cleared on the next keypress
+	LN_ABS = 2,	///< `2#`: absolute numbers in the left column
+	LN_INDENT = 4,	///< `4#`: relative number moved to just before the first non-blank character
+	LN_REL = 8,	///< `8#`: relative numbers in the left column
+};
 /** screen redraw - bit 1: whole screen, bit 2: current line, bit 3: update vi_col; any nonzero value recomputes vi_col */
 static int vi_mod;
 static char vi_word_m[] = "\0leEwW";	///< motion hint modes drawn under the cursor line (^v); "\0" = off
 static char *vi_word = vi_word_m;	///< current hint mode, points into vi_word_m
 static char *_vi_word = vi_word_m;	///< base of vi_word_m
 static int vi_wsel = 1;	///< last selected hint mode index (1..5)
-static int vi_rshift;	///< rows below the cursor are shifted down by 1 while the hint row is shown
+static int hint_row_shift;	///< rows below the cursor are shifted down by 1 while the hint row is shown (was vi_rshift)
 static int vi_arg;	///< numeric count prefix, 0 if none
 static char vi_charlast[5];	///< the last character searched via f, t, F, or T
 static int vi_charcmd;	///< the character finding command (f, t, F or T)
@@ -131,8 +138,8 @@ static int vi_nextcol(char *ln, int dir, int *off)
 nrow = cursor_row; \
 noff = cursor_off; \
 for (i = 0, ret = 0;; i++) { \
-	l1 = ren_next(c, ren_pos(c, noff), 1)-1-opt_left_col+vi_lncol; \
-	if (l1 > term_cols || l1 < 0 || ret || l1 >= rstate->cmax + vi_lncol) \
+	l1 = ren_next(c, ren_pos(c, noff), 1)-1-opt_left_col+lnum_width; \
+	if (l1 > term_cols || l1 < 0 || ret || l1 >= rstate->cmax + lnum_width) \
 		break; \
 	i = i > 99 ? i % 100 : i; \
 	itoa(i%10 ? i%10 : i, snum); \
@@ -143,7 +150,7 @@ for (i = 0, ret = 0;; i++) { \
 /** @brief Draw buffer row on screen, with the motion hint row or line numbers if enabled. */
 static void vi_drawrow(int row)
 {
-	int l1, i, i1, lnnum = vi_lnnum;
+	int l1, i, i1, lnum_cur = lnum_mode;
 	char *c, *s;
 	static char ch[5] = "~";
 	if (opt_multiline_prompt == 1 && !vi_status && row == view_top_row + term_rows - 1)
@@ -152,8 +159,8 @@ static void vi_drawrow(int row)
 		int noff, nrow, ret;
 		c = lbuf_get(xb, cursor_row);
 		if (row != cursor_row+1 || !c || *c == '\n') {
-			vi_rshift = (row > cursor_row+1 && c && *c != '\n');
-			s = lbuf_get(xb, row - vi_rshift);
+			hint_row_shift = (row > cursor_row+1 && c && *c != '\n');
+			s = lbuf_get(xb, row - hint_row_shift);
 			goto skip;
 		}
 		char tmp[term_cols+3], snum[32];
@@ -170,7 +177,7 @@ static void vi_drawrow(int row)
 			vi_drawnum(vi_nextcol(c, -1, &noff))
 		} else
 			vi_drawnum(lbuf_wordend(xb, i1, -2, &nrow, &noff))
-		l1 = ren_next(c, ren_pos(c, cursor_off), 1)-1-opt_left_col+vi_lncol;
+		l1 = ren_next(c, ren_pos(c, cursor_off), 1)-1-opt_left_col+lnum_width;
 		if (l1 >= 0 && l1 <= term_cols)
 			tmp[l1] = *vi_word;
 		preserve(int, opt_reorder, opt_reorder = 0;)
@@ -190,17 +197,21 @@ static void vi_drawrow(int row)
 	rstate += row != cursor_row;
 	if (!s)
 		s = row ? ch : ch+1;
-	else if (lnnum && opt_line_editor) {
+	else if (lnum_cur && opt_line_editor) {
 		char tmp[32], tmp1[32], *p;
+		/* Line numbers: tmp = "<abs> <rel> " (left column text), p = start of the
+		 * relative part in tmp, i/i1 = digit widths of the widest visible
+		 * absolute/relative number, l1 = total column width. With LN_INDENT
+		 * i1 is then reused as the screen column just before the indent. */
 		c = tmp, i = 0, i1 = 0;
-		if (lnnum == 1 || lnnum & 2) {
-			c = itoa(row+1-vi_rshift, tmp);
+		if (lnum_cur == LN_ONCE || lnum_cur & LN_ABS) {
+			c = itoa(row+1-hint_row_shift, tmp);
 			*c++ = ' ';
 			i = itoalen(view_top_row+term_rows);
 		}
 		p = c;
-		if (lnnum == 1 || lnnum & 4 || lnnum & 8) {
-			c = itoa(abs(cursor_row-row+vi_rshift), c);
+		if (lnum_cur == LN_ONCE || lnum_cur & LN_INDENT || lnum_cur & LN_REL) {
+			c = itoa(abs(cursor_row-row+hint_row_shift), c);
 			*c++ = ' ';
 			i1 = itoalen(term_rows);
 		}
@@ -208,18 +219,18 @@ static void vi_drawrow(int row)
 		/* l1: column width, padding the numbers to the digits of the widest
 		 * visible absolute (i) and relative (i1) numbers */
 		l1 = (c - tmp) + (i+i1 - (strlen(tmp) - !!i - !!i1));
-		vi_lncol = dir_context(s) < 0 ? 0 : l1;
+		lnum_width = dir_context(s) < 0 ? 0 : l1;
 		memset(c, ' ', l1 - (c - tmp));
 		c[l1 - (c - tmp)] = '\0';
 		led_crender(s, row - view_top_row, l1, opt_left_col, opt_left_col + term_cols - l1)
 		preserve(int, syn_blockhl, syn_blockhl = -1;)
 		preserve(int, ftidx,)
 		syn_setft(nn_ft);
-		if ((lnnum == 1 || lnnum & 4) && !opt_left_col && vi_lncol) {
+		if ((lnum_cur == LN_ONCE || lnum_cur & LN_INDENT) && !opt_left_col && lnum_width) {
 			for (i1 = 0; i1 < rstate->cmax &&
 					memchr(" \t", *rstate->chrs[ren_off(s, i1)], 2);)
 				i1 = ren_next(s, i1, 1);
-			i1 -= (itoa(abs(cursor_row-row+vi_rshift), tmp1) - tmp1)+1;
+			i1 -= (itoa(abs(cursor_row-row+hint_row_shift), tmp1) - tmp1)+1;
 			if (i1 >= 0) {
 				memset(p, ' ', strlen(p));
 				RST(2, led_prender(tmp1, row - view_top_row, l1+i1, 0, l1))
@@ -1267,7 +1278,7 @@ void vi(int init)
 		topfix()
 		vi_col = vi_off2col(xb, cursor_row, cursor_off);
 		vi_drawagain(view_top_row);
-		term_pos(cursor_row - view_top_row, led_pos(lbuf_get(xb, cursor_row), vi_col) + vi_lncol);
+		term_pos(cursor_row - view_top_row, led_pos(lbuf_get(xb, cursor_row), vi_col) + lnum_width);
 	}
 	while (!quit_state) {
 		int nrow = cursor_row;
@@ -1281,9 +1292,9 @@ void vi(int init)
 		vi_ybuf = vi_yankbuf(TK_CTL('l'));
 		vi_arg = vi_prefix();
 		term_dec()
-		if (vi_lnnum == 1) {
-			vi_lnnum = 0;
-			vi_lncol = 0;
+		if (lnum_mode == LN_ONCE) {
+			lnum_mode = 0;
+			lnum_width = 0;
 			vi_mod |= 1;
 		}
 		if (opt_multiline_prompt == 1) {
@@ -1428,11 +1439,11 @@ void vi(int init)
 				vi_mod |= 1;
 				break;
 			case '#':
-				if (vi_lnnum & vi_arg)
-					vi_lnnum = vi_lnnum & ~vi_arg;
+				if (lnum_mode & vi_arg)
+					lnum_mode = lnum_mode & ~vi_arg;
 				else
-					vi_lnnum = vi_arg ? vi_lnnum | vi_arg : !vi_lnnum;
-				vi_lncol = 0;
+					lnum_mode = vi_arg ? lnum_mode | vi_arg : !lnum_mode;
+				lnum_width = 0;
 				vi_mod |= 1;
 				break;
 			case 'v':
@@ -1535,7 +1546,7 @@ void vi(int init)
 					vi_word = _vi_word + vi_arg;
 				} else
 					vi_word = _vi_word + (!*vi_word * vi_wsel);
-				vi_rshift = 0;
+				hint_row_shift = 0;
 				vi_mod |= 1;
 				break;
 			case ':':
@@ -1899,7 +1910,7 @@ void vi(int init)
 		}
 		term_record = 1;
 		if (vi_mod & 1 || opt_left_col != oleft
-				|| (vi_lnnum && orow != cursor_row && !(vi_lnnum == 2))
+				|| (lnum_mode && orow != cursor_row && !(lnum_mode == LN_ABS))
 				|| (*vi_word && orow != cursor_row))
 			vi_drawagain(view_top_row);
 		else if (*vi_word && (ooff != cursor_off || vi_mod & 2)
@@ -1927,7 +1938,7 @@ void vi(int init)
 			if (opt_multiline_prompt > 0)
 				opt_multiline_prompt = 0;
 		}
-		term_pos(cursor_row - view_top_row, n + vi_lncol);
+		term_pos(cursor_row - view_top_row, n + lnum_width);
 		term_commit();
 		xb->useq += opt_undo_seq;
 	}

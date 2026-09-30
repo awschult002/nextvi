@@ -631,7 +631,7 @@ char *conf_digraph(int c1, int c2);
 /* vi.c: main */
 void vi(int init);
 extern int vi_hidch;
-extern int vi_lncol;
+extern int lnum_width;
 /* filesystem */
 extern rset *fsincl;
 void dir_calc(char *path);
