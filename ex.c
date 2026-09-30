@@ -1502,7 +1502,7 @@ static char *spcmd;		/* the speller in use */
 static char spmsg[128];		/* the speller's own complaint, forwarded */
 
 /* speller lines by word, "& word cnt off: sug, sug" and "# word off" */
-static s64 spell_cmp(const void *v1, const void *v2)
+static int spell_cmp(const void *v1, const void *v2)
 {
 	char *s1 = *(char *const *)v1 + 2, *s2 = *(char *const *)v2 + 2;
 	for (; *s1 == *s2 && *s1 && *s1 != ' '; s1++, s2++);
