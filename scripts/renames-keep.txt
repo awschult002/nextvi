@@ -1,0 +1,10 @@
+# vi.h globals deliberately kept under their current name (already descriptive).
+# One name per line; lines starting with # are ignored. Read by scripts/unmapped.sh.
+bufs
+tempbufs
+term_record
+term_resized
+term_sbuf
+term_ufd
+term_winch
+utf8_length

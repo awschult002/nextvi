@@ -42,3 +42,6 @@ while IFS='	' read -r old new; do
 	perl -pi -e "s/\\b(tmp)?\Q$old\E\\b/\$1$new/g" *.c *.h
 done < "$todo"
 echo "renamed $(wc -l < "$todo") names"
+
+# Report vi.h globals that no table maps (e.g. new upstream globals). Informational only.
+scripts/unmapped.sh || true
