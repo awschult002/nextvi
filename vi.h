@@ -328,7 +328,8 @@ int syn_addhl(char *reg, int id);
 void syn_init(void);
 
 /* uc.c: utf-8 helper functions */
-extern unsigned char utf8_length[256];
+extern unsigned char _utf8_length[256];
+extern unsigned char *utf8_length;
 extern int zwlen, def_zwlen;
 extern int bclen, def_bclen;
 /* the length of a given utf-8 character */

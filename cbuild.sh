@@ -48,6 +48,7 @@ CFLAGS="\
 -Wno-unused-parameter \
 -Wno-unused-result \
 -Wfatal-errors -std=c99 \
+-lpthread \
 $CFLAGS"
 
 case "$OS" in

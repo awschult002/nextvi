@@ -500,44 +500,119 @@ int lbuf_findchar(struct lbuf *lb, char *cs, int cmd, int n, int *row, int *off)
 	return n != 0;
 }
 
-int lbuf_search(struct lbuf *lb, rstr *re, int dir, int beg, int end, int pskip,
-		int nskip, int *r, int *o)
+struct lsparams
 {
-	int r0 = *r, o0 = *o;
-	int offs[re->rs ? re->rs->nsubc : 2], i = r0;
-	char *s = lbuf_get(lb, i);
-	int off, g1, g2, _o, step, flg;
-	if (pskip >= 0 && s)
-		off = rstate->s == s ? rstate->chrs[MIN(o0 + pskip, rstate->n)] - s
-					: uc_chr(s, o0 + pskip) - s;
-	else
-		off = 0;
-	for (; i >= beg && i < end; i += dir) {
+	struct lbuf *lb;
+	rstr *re;
+	int dir;
+	int beg;
+	int end;
+	int *r;
+	int *o;
+	int off;
+	int nskip;
+};
+
+static void *lsearch(void *arg)
+{
+	struct lsparams *a = arg;
+	int r0 = *a->r, o0 = *a->o;
+	int offs[a->re->rs ? a->re->rs->nsubc : 2], i = r0;
+	char *s;
+	int off = a->off, g1, g2, _o, step, flg;
+	for (; i >= a->beg && i < a->end; i += a->dir) {
 		_o = 0;
 		step = 0;
 		flg = REG_NEWLINE;
-		s = lb->ln[i];
-		while (rstr_find(re, s + off, offs, flg) >= 0) {
+		s = a->lb->ln[i];
+		while (rstr_find(a->re, s + off, offs, flg) >= 0) {
 			flg |= REG_NOTBOL;
 			g1 = offs[xgrp], g2 = offs[xgrp + 1];
 			if (g1 < 0) {
-				off += offs[1] > 0 ? offs[1] : uc_len(s + off);
+				off += offs[1] > 0 ? offs[1] : MAX(1, uc_len(s + off));
 				continue;
 			}
 			_o += uc_off(s + step, off + g1 - step);
-			if (dir < 0 && r0 == i && _o > o0 - nskip)
+			if (a->dir < 0 && r0 == i && _o > o0 - a->nskip)
 				break;
-			*o = _o;
-			*r = i;
-			if (dir > 0)
-				return 0;
+			*a->o = _o;
+			*a->r = i;
 			step = off + g1;
-			off += g2 > 0 ? g2 : uc_len(s + off);
-			end = -1; /* break outer loop efficiently */
+			off += g2 > 0 ? g2 : MAX(1, uc_len(s + off));
+			a->end = -1; /* break outer loop efficiently */
+			if (a->dir > 0)
+				return NULL;
 		}
 		off = 0;
 	}
-	return end < 0 ? 0 : 1;
+	return NULL;
+}
+
+int lbuf_search(struct lbuf *lb, rstr *re, int dir, int beg, int end, int pskip,
+		int nskip, int *r, int *o)
+{
+	static pthread_attr_t lsattr;	/* musl caps threads at 128k; main()'s stack */
+	static pthread_attr_t *lsattr_ok;	/* &lsattr after the one-time sizing */
+	#define NUM_THREADS 4
+	pthread_t threads[NUM_THREADS];
+	static unsigned char fake_ulen[256]; /* novelty: for fast thread termination */
+	struct lsparams data[NUM_THREADS];
+	int rs[NUM_THREADS];
+	int os[NUM_THREADS];
+	int thread_step = MAX(end / NUM_THREADS, 1); /* number of lines assigned per thread */
+	int step = 0, i = 0, off;
+	char *s = lbuf_get(lb, *r);
+	if (pskip >= 0 && s)
+		off = rstate->s == s ? rstate->chrs[MIN(*o + pskip, rstate->n)] - s
+					: uc_chr(s, *o + pskip) - s;
+	else
+		off = 0;
+	utf8_length['\n'] = 0;
+	if (!lsattr_ok) {
+		struct rlimit rl;
+		pthread_attr_init(&lsattr);
+		if (!getrlimit(RLIMIT_STACK, &rl) && rl.rlim_cur != RLIM_INFINITY)
+			pthread_attr_setstacksize(&lsattr, rl.rlim_cur);
+		lsattr_ok = &lsattr;
+	}
+	for (i = 0; i < NUM_THREADS; i++) {
+		if (*r + step > end || *r + step * dir < 0)
+			break;
+		data[i].lb = lb;
+		data[i].re = re;
+		data[i].dir = dir;
+		data[i].off = i ? 0 : off;
+		rs[i] = *r + step * dir;
+		step += thread_step;
+		data[i].r = &rs[i];
+		data[i].beg = beg;
+		data[i].nskip = nskip;
+		if (i == NUM_THREADS-1)
+			data[i].end = end;
+		else
+			data[i].end = MIN(rs[i] + thread_step, end);
+		os[i] = i ? -1 : *o;
+		data[i].o = &os[i];
+		pthread_create(&threads[i], lsattr_ok, lsearch, (void*) &data[i]);
+	}
+	for (step = i, i = 0; i < step; i++) {
+		pthread_join(threads[i], NULL);
+		if (data[i].end < 0) {
+			*r = *data[i].r;
+			*o = *data[i].o;
+			for (int z = i+1; z < step; z++)
+				data[z].end = -1;
+			/* force instant termination, regardless how long string is */
+			utf8_length = fake_ulen;
+			for (int z = i+1; z < step; z++)
+				pthread_join(threads[z], NULL);
+			utf8_length = _utf8_length;
+			utf8_length['\n'] = 1;
+			return 0;
+		}
+	}
+	utf8_length['\n'] = 1;
+	return 1;
 }
 
 int lbuf_sectionbeg(struct lbuf *lb, int dir, int *row, int *off, int ch)

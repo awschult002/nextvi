@@ -426,7 +426,7 @@ static rcode *re_make(char *re, int *nsubc, int flg)
 	return prog;
 }
 
-#define _return(state) { if (eol_ch) utf8_length[eol_ch] = 1; return state; } \
+#define _return(state) { if (flg & REG_NEWLINE) utf8_length[eol_ch] = 1; return state; } \
 
 #define newsub(init, copy) \
 if (freesub) { \
@@ -668,8 +668,10 @@ static int re_pikevm(rcode *prog, const char *s, const char **subp, int nsubc, i
 	char nsubs[prog->sub];
 	for (i = 0; i < prog->laidx; i++)
 		lb[i] = NULL;
-	if (eol_ch)
+	if (eol_ch && utf8_length[eol_ch])
 		utf8_length[eol_ch] = 0;
+	else
+		flg &= ~REG_NEWLINE;
 	if (flg & REG_ICASE)
 		goto jmp_start1;
 	goto jmp_start2;
@@ -840,8 +842,13 @@ if (!*m) { \
 } \
 break##gen:; \
 
+/* lbuf_search swaps utf8_length for an all zero table to terminate its search
+ * threads with no synchronization; entry 1 is never zero in the real table, so
+ * reading it is how a scan that never decodes utf-8 notices the same kill */
+#define rstr_live utf8_length[1]
+
 #define rstr_match1(gen, wbeg, wend, cmpcase, stopcond) \
-{ for (r = beg; stopcond; r++) { \
+{ for (r = beg; (stopcond) && rstr_live; r++) { \
 	rstr_cmp(2##gen, wbeg, wend, cmpcase) \
 } } \
 

@@ -15,6 +15,8 @@
 #include <sys/wait.h>
 #include <pthread.h>
 #include <sys/resource.h>
+#include <pthread.h>
+#include <sys/resource.h>
 #include "vi.h"
 #include "conf.c"
 #include "ex.c"
