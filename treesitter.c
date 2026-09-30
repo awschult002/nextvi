@@ -313,7 +313,7 @@ s64 ts_preview_update(struct ts_state *s, char *text)
 	return 1;
 }
 
-static s64 ts_capture_cmp(const void *a, const void *b)
+static int ts_capture_cmp(const void *a, const void *b)
 {
 	const struct ts_capture *x = a, *y = b;
 	if (x->pattern != y->pattern)
