@@ -39,7 +39,9 @@ Names, constants and line breaks cost the compiler nothing. The rules:
 3. **Split long expressions** into named intermediate values when that makes the intent readable.
 4. **Explain pointer arithmetic, don't replace it.** Add a comment saying what each pointer marks, and keep the tight code.
 5. **Long functions can be split** (for example `vi_drawrow` or the key switch) into static helpers with clear names.
-6. **Readability-only changes must leave the binary identical.** Build with `-O2`, strip it, drop the build-id note, and compare against the base commit. If the bytes differ, the change wasn't readability-only and has to be reviewed as a behavior change.
+6. **Prove it didn't change behavior. There are two tiers:**
+   - *Renames, comments, named constants:* the binary must stay identical. Build with `-O2`, strip it, drop the build-id note, and compare against the base commit.
+   - *Splitting functions or the key switch:* the binary will legitimately differ, because inlining and register allocation change. Instead, run the `tests/` harness on the old and new builds. It runs `EXINIT` + `&` keystroke scripts in a fixed-size pty, renders the output through a terminal emulator (`pyte`), and diffs the final screen grid and any written files. Don't diff raw pty bytes. Also check the size of the redraw path and take the median of several timing runs, since that code runs on every keystroke.
 7. **Comments follow [`DOXYGEN.md`](DOXYGEN.md).**
 
 ## 4. Personal changes and upstream
