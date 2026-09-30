@@ -203,6 +203,7 @@ int term_read(int winch)
 		tibuf_cnt = 1;
 		tibuf_pos = 0;
 	}
+	vi_rendwait();		/* the queued frame overlaps the read above */
 	if (ticmd_pos < sizeof(ticmd))
 		ticmd[ticmd_pos++] = tibuf[tibuf_pos];
 	return tibuf[tibuf_pos++];

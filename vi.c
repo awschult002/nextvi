@@ -13,6 +13,8 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
+#include <pthread.h>
+#include <sys/resource.h>
 #include "vi.h"
 #include "conf.c"
 #include "ex.c"
@@ -23,6 +25,22 @@
 #include "term.c"
 #include "uc.c"
 #include "lsp.c"
+
+/* the frame the redraw thread paints while the input loop reads keys */
+static struct vi_rend {
+	pthread_mutex_t mtx;
+	pthread_cond_t req;		/* a frame is queued */
+	pthread_cond_t done;		/* the queued frame is painted */
+	pthread_t tid;
+	int on;				/* 1 threaded, -1 pthread_create() failed */
+	int busy;			/* a frame is queued or being painted */
+	int skip;			/* mod bits of the frames dropped so far */
+	int mod;			/* vi_mod when the frame was queued */
+	int otop, oleft, orow, ooff;	/* the state the frame draws over */
+	int pos;			/* the cursor column of the frame */
+} vi_rend = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER,
+		PTHREAD_COND_INITIALIZER};
+static void vi_rendpost(int mod, int otop, int oleft, int orow, int ooff, int pos);
 
 int vi_hidch;			/* show hidden chars */
 int vi_lncol;			/* line numbers cursor offset */
@@ -155,7 +173,7 @@ static void vi_drawrow(int row)
 	if (s && xb_path && xb_path[0])
 		diag = lsp_diag_for_line(xb_path, row, &dsev);
 	skip:
-	rstate += row != xrow;
+	rstate = rstates+1;
 	if (!s)
 		s = row ? ch : ch+1;
 	else if (lnnum && xled) {
@@ -477,12 +495,15 @@ static int fs_searchback(int cnt, int *row, int *off)
 static char rep_cmd[sizeof(ticmd)];	/* the last command */
 static int rep_len;
 #define rep_record() memcpy(rep_cmd, ticmd, ticmd_pos); rep_len = ticmd_pos;
+static __thread int redraw_thread;	/* paint thread: never measure on slot 0 */
 
 static void vc_status(int type)
 {
 	int l, col;
 	unsigned int cp;
 	char cbuf[8] = "", vi_msg[512], *c;
+	if (redraw_thread)
+		rstate = rstates+1;
 	col = vi_off2col(xb, xrow, xoff);
 	col = ren_cursor(lbuf_get(xb, xrow), col) + 1;
 	if (type && lbuf_get(xb, xrow)) {
@@ -500,6 +521,8 @@ static void vc_status(int type)
 			xrow * 100 / MAX(1, lbuf_len(xb)-1), xrow+1, col,
 			istempbuf(ex_buf) ? tempbufs - ex_buf - 1 : ex_buf - bufs);
 	}
+	if (redraw_thread)
+		rstate = rstates;
 	vi_drawmsg_mpt(vi_msg)
 }
 
@@ -1812,7 +1835,44 @@ void vi(int init)
 			lsp_dirty = 0;
 			vi_mod |= 1;
 		}
-		term_record = 1;
+		vi_rendpost(vi_mod, otop, oleft, orow, ooff, n);
+		xb->useq += xseq;
+	}
+	vi_rendwait();
+	if (--xgrec == 0) {
+		term_pos(xrows - !vi_status, 0);
+		if (xmpt > 0 && !xpln)
+			term_chr('\n');
+		else
+			term_kill();
+	}
+}
+
+/* paint the queued frames; the state a frame reads is frozen until it lands */
+static void *vi_rendloop(void *arg)
+{
+	struct vi_rend *r = arg;
+	int once = r->on < 0;		/* no thread: this call paints one frame */
+	if (!once) {
+		redraw_thread = 1;	/* this thread paints, never slot 0 */
+		sigset_t set;		/* SIGWINCH belongs to the input loop */
+		sigemptyset(&set);
+		sigaddset(&set, SIGWINCH);
+		pthread_sigmask(SIG_BLOCK, &set, NULL);
+	}
+	do {
+		int vi_mod, otop, oleft, orow, ooff, n;
+		pthread_mutex_lock(&r->mtx);
+		while (!once && !r->busy)
+			pthread_cond_wait(&r->req, &r->mtx);
+		vi_mod = r->mod;
+		otop = r->otop;
+		oleft = r->oleft;
+		orow = r->orow;
+		ooff = r->ooff;
+		n = r->pos;
+		pthread_mutex_unlock(&r->mtx);
+		term_record = 1;	/* one frame, one write */
 		if (vi_mod & 1 || xleft != oleft
 				|| (vi_lnnum && orow != xrow && !(vi_lnnum == 2))
 				|| (*vi_word && orow != xrow))
@@ -1844,15 +1904,66 @@ void vi(int init)
 		}
 		term_pos(xrow - xtop, n + vi_lncol);
 		term_commit();
-		xb->useq += xseq;
+		pthread_mutex_lock(&r->mtx);
+		r->busy = 0;
+		pthread_cond_signal(&r->done);
+		pthread_mutex_unlock(&r->mtx);
+	} while (!once);
+	return NULL;
+}
+
+/* wait for the queued frame; the editor state is shared until this returns */
+void vi_rendwait(void)
+{
+	struct vi_rend *r = &vi_rend;
+	if (r->on != 1)
+		return;
+	pthread_mutex_lock(&r->mtx);
+	while (r->busy)
+		pthread_cond_wait(&r->done, &r->mtx);
+	pthread_mutex_unlock(&r->mtx);
+}
+
+/* whether input is waiting; a frame drawn now is stale before it lands */
+static int vi_rendpend(void)
+{
+	return tibuf_pos < tibuf_cnt || poll(&term_ufd, 1, 0) > 0;
+}
+
+/* queue a frame and hand the input loop its thread back */
+static void vi_rendpost(int mod, int otop, int oleft, int orow, int ooff, int pos)
+{
+	struct vi_rend *r = &vi_rend;
+	mod |= r->skip;
+	if (!xquit && vi_rendpend()) {
+		r->skip = mod | 1;
+		return;
 	}
-	if (--xgrec == 0) {
-		term_pos(xrows - !vi_status, 0);
-		if (xmpt > 0 && !xpln)
-			term_chr('\n');
-		else
-			term_kill();
+	r->skip = 0;
+	if (!r->on) {
+		/* musl caps new threads at 128k; give the thread main()'s stack */
+		pthread_attr_t attr, *ap = NULL;
+		struct rlimit rl;
+		r->on = 1;
+		if (!pthread_attr_init(&attr) && !getrlimit(RLIMIT_STACK, &rl)
+				&& rl.rlim_cur != RLIM_INFINITY
+				&& !pthread_attr_setstacksize(&attr, rl.rlim_cur))
+			ap = &attr;
+		if (pthread_create(&r->tid, ap, vi_rendloop, r))
+			r->on = -1;
 	}
+	pthread_mutex_lock(&r->mtx);
+	r->mod = mod;
+	r->otop = otop;
+	r->oleft = oleft;
+	r->orow = orow;
+	r->ooff = ooff;
+	r->pos = pos;
+	r->busy = r->on > 0;
+	pthread_cond_signal(&r->req);
+	pthread_mutex_unlock(&r->mtx);
+	if (r->on < 0)
+		vi_rendloop(r);
 }
 
 static void sighandler(int signo)

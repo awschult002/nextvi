@@ -43,6 +43,7 @@ run() {
 CFLAGS="\
 -pedantic -Wall -Wextra \
 -Wno-implicit-fallthrough \
+-pthread \
 -Wno-missing-field-initializers \
 -Wno-unused-parameter \
 -Wno-unused-result \

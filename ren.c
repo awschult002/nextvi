@@ -85,10 +85,10 @@ static int ren_cwid(char *s, int pos)
 	return uc_wid(c);
 }
 
-/* 0 = current line, 1 = all other lines,
-2 = aux rendering (never lbuf backed by construction) */
+/* 0 = editor's current line cache, 1 = drawing, 2 = aux
+(the paint thread only ever uses 1 and 2) */
 ren_state rstates[3];
-ren_state *rstate = rstates;
+__thread ren_state *rstate = rstates;
 
 /* specify the screen position of the characters in s */
 ren_state *ren_position(char *s)

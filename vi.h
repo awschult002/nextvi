@@ -264,7 +264,7 @@ typedef struct {
 	char nulhole[4];
 } ren_state;
 extern ren_state rstates[3];
-extern ren_state *rstate;
+extern __thread ren_state *rstate;
 #define RST(n, func) { rstate = rstates+n; rstate->s = NULL; func; rstate -= n; }
 #define RST_NULL(...) { \
 	int i_[] = {__VA_ARGS__}; \
@@ -629,6 +629,7 @@ char *conf_digraph(int c1, int c2);
 
 /* vi.c: main */
 void vi(int init);
+void vi_rendwait(void);
 extern int vi_hidch;
 extern int vi_lncol;
 /* filesystem */
