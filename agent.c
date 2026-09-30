@@ -478,9 +478,9 @@ static sbuf *agent_process(char **argv, sbuf *input, s64 *status, s64 http,
 {
 	FILE *in = tmpfile();
 	struct pollfd fds[3];
-	s64 output[2] = {-1, -1}, error[2] = {-1, -1}, pid, done = 0, st = 0,
+	int output[2] = {-1, -1}, error[2] = {-1, -1}, pid, done = 0, st = 0,
 		killed = 0, tidx = http ? 2 : 1, interactive = !http && xish;
-	void (*old_ttou)(s64) = SIG_DFL, (*old_ttin)(s64) = SIG_DFL;
+	void (*old_ttou)(int) = SIG_DFL, (*old_ttin)(int) = SIG_DFL;
 	char buf[4097];
 	sbuf *sb, *eb = NULL;
 	if (errout)
@@ -1269,7 +1269,7 @@ static void *ec_ast(char *loc, char *cmd, char *arg)
 				sums[r] += strlen(content->valuestring);
 		}
 		char *json = cJSON_PrintUnformatted(agent_messages);
-		snprintf(msg, sizeof(msg), "context    %ld messages, %ld bytes payload",
+		snprintf(msg, sizeof(msg), "context    %d messages, %ld bytes payload",
 			cJSON_GetArraySize(agent_messages),
 			json ? (long)strlen(json) : 0);
 		ex_print(msg, msg_ft)
