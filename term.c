@@ -377,7 +377,10 @@ sbuf *cmd_pipe(char *cmd, sbuf *ibuf, s64 oproc, s64 *status)
 		close(ofd);
 	if (fds[1].fd >= 0)
 		close(ifd);
-	waitpid(pid, (int*)status, 0);
+	int wst = 0;
+	waitpid(pid, &wst, 0);
+	if (status)
+		*status = wst;
 	signal(SIGTTOU, SIG_IGN);
 	tcsetpgrp(term_ufd.fd, getpgrp());
 	signal(SIGTTOU, SIG_DFL);
