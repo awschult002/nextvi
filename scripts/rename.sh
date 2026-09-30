@@ -21,9 +21,13 @@ if grep -q 'x##opt' ex.c; then
 	echo "rewrote EO(opt) -> EO(opt, var) in ex.c"
 fi
 
-has() { grep -qw -- "$1" *.c *.h; }
+# Code with comments and string literals blanked, so names in doc comments
+# such as "(was xai)" do not count as uses.
+code=$(mktemp)
+perl -0777 -pe 's{/\*.*?\*/|//[^\n]*|\x27(?:\\.|[^\x27\\\n])*\x27|"(?:\\.|[^"\\\n])*"}{ }gs' *.c *.h > "$code"
+has() { grep -qw -- "$1" "$code"; }
 todo=$(mktemp)
-trap 'rm -f "$todo"' EXIT
+trap 'rm -f "$todo" "$code"' EXIT
 bad=0
 while IFS='	' read -r old new; do
 	[ -z "$old" ] && continue
