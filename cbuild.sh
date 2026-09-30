@@ -61,14 +61,23 @@ esac
 # Fetch once; compile the runtime and generated C parser into vi.
 ts_fetch() (
     ts_dest=".treesitter/$1-$3"
-    [ -d "$ts_dest" ] && exit 0
     require git
+    # checkout $1 must be exactly commit $2: HEAD matches and no file differs
+    ts_ok() {
+        [ "$(git -C "$1" rev-parse HEAD 2>/dev/null)" = "$2" ] &&
+        [ -z "$(git -C "$1" status --porcelain --untracked-files=all)" ]
+    }
+    if [ -d "$ts_dest" ]; then
+        ts_ok "$ts_dest" "$3" && exit 0
+        log "$R" "$ts_dest does not match $1 $2 ($3); remove it to refetch"
+        exit 1
+    fi
     mkdir -p .treesitter || exit 1
     ts_tmp="$ts_dest.tmp.$$"
     trap 'rm -rf "$ts_tmp"' EXIT
     trap 'exit 1' HUP INT TERM
     git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$2" "https://github.com/tree-sitter/$1" "$ts_tmp" || exit 1
-    [ "$(git -C "$ts_tmp" rev-parse HEAD)" = "$3" ] || {
+    ts_ok "$ts_tmp" "$3" || {
         log "$R" "Unexpected revision for $1 $2"
         exit 1
     }
