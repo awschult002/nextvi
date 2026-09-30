@@ -772,3 +772,146 @@ int rset_match(rset *rs, char *s, int flg)
 {
 	return re_pikevm(rs->regex, s, NULL, 0, flg);
 }
+/* return zero if a simple pattern is given */
+static int rstr_simple(rstr *rs, char *re, int icase)
+{
+	char *beg;
+	char *end;
+	if (!strcmp(re, "^$"))
+		return 1;
+	rs->lbeg = re[0] == '^';
+	if (rs->lbeg)
+		re++;
+	rs->wbeg = re[0] == '\\' && re[1] == '<';
+	if (rs->wbeg)
+		re += 2;
+	beg = re;
+	while (re[0] && !strchr("\\.*+?[{()$|", (unsigned char) re[0]))
+		re++;
+	end = re;
+	rs->wend = re[0] == '\\' && re[1] == '>';
+	if (rs->wend)
+		re += 2;
+	rs->lend = re[0] == '$';
+	if (rs->lend)
+		re++;
+	if (!re[0]) {
+		int len = end - beg;
+		rs->len = len;
+		rs->str = emalloc(len + 1);
+		rs->str[len] = '\0';
+		if (icase) {
+			while (--len >= 0)
+				rs->str[len] = tolower((unsigned char)beg[len]);
+		} else
+			memcpy(rs->str, beg, len);
+		return 0;
+	}
+	return 1;
+}
+
+rstr *rstr_make(char *re, int flg)
+{
+	rstr *rs = emalloc(sizeof(*rs));
+	memset(rs, 0, sizeof(*rs));
+	rs->flg = flg;
+	if (rstr_simple(rs, re, flg & REG_ICASE))
+		rs->rs = rset_make(1, &re, flg);
+	if (!rs->rs && !rs->str) {
+		free(rs);
+		return NULL;
+	}
+	return rs;
+}
+
+#define rstr_cmp(gen, wbeg, wend, cmpcase) \
+wbeg wend \
+m = rs->str; t = r; \
+for (; *m && *t; t++, m++) { \
+	if (cmpcase) \
+		goto break##gen; \
+} \
+if (!*m) { \
+	if (grps) { \
+		grps[0] = r - s; \
+		grps[1] = r - s + len; \
+	} \
+	return 0; \
+} \
+break##gen:; \
+
+#define rstr_match1(gen, wbeg, wend, cmpcase, stopcond) \
+{ for (r = beg; stopcond; r++) { \
+	rstr_cmp(2##gen, wbeg, wend, cmpcase) \
+} } \
+
+#define _wbeg if (r > s && (isword(r - 1) || !isword(r))) continue;
+#define _wend if (r[len] && (!isword(r + len - 1) || isword(r + len))) continue;
+
+#define template(gen, cmpcase, stopcond) \
+if (!rs->wbeg && !rs->wend) \
+	rstr_match1(1##gen, /*nop*/, /*nop*/, cmpcase, stopcond) \
+else if (rs->wbeg && !rs->wend) \
+	rstr_match1(2##gen, _wbeg, /*nop*/, cmpcase, stopcond) \
+else if (!rs->wbeg && rs->wend) \
+	rstr_match1(3##gen, /*nop*/, _wend, cmpcase, stopcond) \
+else \
+	rstr_match1(4##gen, _wbeg, _wend, cmpcase, stopcond) \
+
+/* return zero if an occurrence is found */
+int rstr_find(rstr *rs, char *s, int *grps, int flg)
+{
+	int len;
+	char *beg, *end, *r, *t, *m;
+	if (rs->rs)
+		return rset_find(rs->rs, s, grps, flg);
+	flg = rs->flg | flg;
+	if ((rs->lbeg && (flg & REG_NOTBOL)) || (rs->lend && (flg & REG_NOTEOL)))
+		return -1;
+	if (!*s)
+		return -1;
+	len = rs->len;
+	beg = s;
+	if (rs->lbeg || rs->lend || !len) {
+		end = s + strlen(s) - (flg & REG_NEWLINE ? 1 : 0);
+		if (end - s < len)
+			return -1;
+		end -= len;
+		if (rs->lend)
+			beg = end;
+		if (rs->lbeg)
+			end = s;
+		if (flg & REG_ICASE) {
+			template(4, tolower((unsigned char) *t) != *m, r <= end)
+		} else {
+			template(3, *t != *m, r <= end)
+		}
+	} else {
+		for (t = s; t - s < len - 1; t++)
+			if (!*t)
+				return -1;
+		if (flg & REG_ICASE) {
+			template(2, tolower((unsigned char) *t) != *m, r[len - 1])
+		} else {
+			template(1, *t != *m, r[len - 1])
+		}
+	}
+	return -1;
+}
+
+int rstr_match(rstr *rs, char *s, int flg)
+{
+	if (rs->rs)
+		return re_pikevm(rs->rs->regex, s, NULL, 0, flg);
+	int ret = rstr_find(rs, s, NULL, flg);
+	return ret < 0 ? 0 : 1;
+}
+
+void rstr_free(rstr *rs)
+{
+	if (!rs)
+		return;
+	rset_free(rs->rs);
+	free(rs->str);
+	free(rs);
+}

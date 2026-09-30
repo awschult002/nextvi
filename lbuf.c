@@ -500,11 +500,11 @@ int lbuf_findchar(struct lbuf *lb, char *cs, int cmd, int n, int *row, int *off)
 	return n != 0;
 }
 
-int lbuf_search(struct lbuf *lb, rset *re, int dir, int beg, int end, int pskip,
+int lbuf_search(struct lbuf *lb, rstr *re, int dir, int beg, int end, int pskip,
 		int nskip, int *r, int *o)
 {
 	int r0 = *r, o0 = *o;
-	int offs[re->nsubc], i = r0;
+	int offs[re->rs ? re->rs->nsubc : 2], i = r0;
 	char *s = lbuf_get(lb, i);
 	int off, g1, g2, _o, step, flg;
 	if (pskip >= 0 && s)
@@ -517,7 +517,7 @@ int lbuf_search(struct lbuf *lb, rset *re, int dir, int beg, int end, int pskip,
 		step = 0;
 		flg = REG_NEWLINE;
 		s = lb->ln[i];
-		while (rset_find(re, s + off, offs, flg) >= 0) {
+		while (rstr_find(re, s + off, offs, flg) >= 0) {
 			flg |= REG_NOTBOL;
 			g1 = offs[xgrp], g2 = offs[xgrp + 1];
 			if (g1 < 0) {

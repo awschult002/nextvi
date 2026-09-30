@@ -153,11 +153,23 @@ typedef struct {
 	int nsubc;		/* total sub count */
 	int n;			/* number of regular expressions in this set */
 } rset;
+typedef struct {
+	rset *rs;		/* only for regex patterns */
+	char *str;		/* for simple, non-regex patterns  */
+	int len;		/* str length */
+	int flg;		/* flags */
+	int lbeg, lend;		/* match line beg/end */
+	int wbeg, wend;		/* match word beg/end */
+} rstr;
 rset *rset_make(int n, char **pat, int flg);
 rset *rset_smake(char *pat, int flg);
 int rset_find(rset *re, char *s, int *grps, int flg);
 int rset_match(rset *rs, char *s, int flg);
 void rset_free(rset *re);
+rstr *rstr_make(char *re, int flg);
+int rstr_find(rstr *rs, char *s, int *grps, int flg);
+int rstr_match(rstr *rs, char *s, int flg);
+void rstr_free(rstr *rs);
 
 /* lbuf.c: line buffer */
 struct lopt {
@@ -220,8 +232,9 @@ int lbuf_indents(struct lbuf *lb, int r);
 int lbuf_eol(struct lbuf *lb, int r, int state);
 int lbuf_next(struct lbuf *lb, int dir, int *r, int *o);
 int lbuf_findchar(struct lbuf *lb, char *cs, int cmd, int n, int *r, int *o);
-int lbuf_search(struct lbuf *lb, rset *re, int dir, int beg, int end, int pskip,
+int lbuf_search(struct lbuf *lb, rstr *re, int dir, int beg, int end, int pskip,
 		int nskip, int *r, int *o);
+
 #define lbuf_dedup(lb, str, n) \
 { for (int i = 0; i < lbuf_len(lb);) { \
 	char *s = lbuf_get(lb, i); \
@@ -516,7 +529,7 @@ extern int xsep;
 extern int xesc;
 extern int xexec_dep;
 extern sbuf *xacreg;
-extern rset *xkwdrs;
+extern rstr *xkwdrs;
 extern sbuf **xregs;
 extern int xregs_n;
 extern int xdefreg;
@@ -556,7 +569,7 @@ void ex_cprint(char *line, char *ft, int r, int c, int left, int flg);
 #define ex_print(line, ft) { RST(2, ex_cprint(line, ft, -1, 0, 0, 1)); }
 void ex_init(char **files, int n);
 void ex_bufpostfix(struct buf *p, int clear);
-int ex_krs(rset **krs, int *dir);
+int ex_krs(rstr **krs, int *dir);
 void ex_krsset(char *kwd, int dir);
 void ex_regesc(sbuf *sb, char *beg, char *end, int ex);
 int ex_edit(const char *path, int len);
@@ -619,7 +632,7 @@ void vi(int init);
 extern int vi_hidch;
 extern int vi_lncol;
 /* filesystem */
-extern rset *fsincl;
+extern rstr *fsincl;
 void dir_calc(char *path);
 
 /* lsp.c */

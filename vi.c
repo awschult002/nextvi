@@ -315,7 +315,7 @@ static int vi_search(int cmd, int cnt, int *row, int *off, int msg)
 		ex_krsset(ex_regget('/') ? ex_regget('/')->s : NULL, xkwddir);
 	if (!lbuf_len(xb) || !xkwddir)
 		return 1;
-	else if (!xkwdrs || xgrp >= xkwdrs->nsubc) {
+	else if (!xkwdrs || xgrp >= (xkwdrs->rs ? xkwdrs->rs->nsubc : 2)) {
 		vi_drawmsg_mpt(xkwdrs ? "invalid grp" : "syntax error")
 		return 1;
 	}
@@ -371,7 +371,7 @@ static void vi_regput(int c, const char *s, int lnmode)
 	ex_regput(tolower(c), s, uc_isupper(c));
 }
 
-rset *fsincl;
+rstr *fsincl;
 static int fspos;
 static int fsdir;
 
@@ -410,7 +410,7 @@ void dir_calc(char *path)
 				memcpy(cpath, ptrs[i], pathlen + len);
 				plen[i++] = pathlen + len;
 			} else if (ret >= 0 && S_ISREG(statbuf.st_mode))
-				if (!fsincl || rset_match(fsincl, cpath, 0)) {
+				if (!fsincl || rstr_match(fsincl, cpath, 0)) {
 					sbuf_mem(sb, cpath, (int)(pathlen + len))
 					sbuf_chr(sb, '\n')
 				}

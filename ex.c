@@ -37,7 +37,7 @@ int xsep = ':';			/* ex command separator */
 int xesc = '\\';		/* ex command arg escape character */
 int xexec_dep;			/* ex_exec recursion depth */
 sbuf *xacreg;			/* autocomplete db filter regex */
-rset *xkwdrs;			/* the last searched keyword rset */
+rstr *xkwdrs;			/* the last searched keyword rset */
 sbuf **xregs;			/* string registers */
 int xregs_n;			/* allocated register count */
 int xdefreg;			/* ex default register */
@@ -228,9 +228,9 @@ void ex_krsset(char *kwd, int dir)
 {
 	sbuf *reg = ex_regget('/');
 	if (kwd && *kwd && ((!reg || !xkwdrs || strcmp(kwd, reg->s))
-			|| ((xkwdrs->regex->flg & REG_ICASE) != xic))) {
-		rset_free(xkwdrs);
-		xkwdrs = rset_smake(kwd, xic ? REG_ICASE : 0);
+			|| ((xkwdrs->flg & REG_ICASE) != xic))) {
+		rstr_free(xkwdrs);
+		xkwdrs = rstr_make(kwd, xic ? REG_ICASE : 0);
 		xkwdcnt++;
 		ex_regput('/', kwd, 0);
 		xkwddir = dir;
@@ -279,7 +279,7 @@ static int ex_range(char *ploc, char **num, int n, int *row)
 		if (!xkwdrs) {
 			xrerr = xserr;
 			return -2;
-		} else if (xgrp >= xkwdrs->nsubc) {
+		} else if (xgrp >= (xkwdrs->rs ? xkwdrs->rs->nsubc : 2)) {
 			xrerr = xgerr;
 			return -2;
 		}
@@ -450,7 +450,7 @@ static void *ec_edit(char *loc, char *cmd, char *arg)
 
 static void *ec_fuzz(char *loc, char *cmd, char *arg)
 {
-	rset *rs;
+	rstr *rs;
 	char *path, *p, buf[128], trunc[128], *sret = NULL;
 	int c, pos, subs[2], inst = -1, lnum = -1;
 	int beg, end, max = INT_MAX, dwid1, dwid2;
@@ -480,16 +480,16 @@ static void *ec_fuzz(char *loc, char *cmd, char *arg)
 	while (1) {
 		sbuf_nul(fuzz)
 		c = 0;
-		rs = rset_smake(fuzz->s, xic ? flg | REG_ICASE : flg);
+		rs = rstr_make(fuzz->s, xic ? flg | REG_ICASE : flg);
 		if (rs) {
-			syn_reloadft(syn_addhl(fuzz->s, 1), rs->regex->flg);
+			syn_reloadft(syn_addhl(fuzz->s, 1), rs->flg);
 			term_record = !!term_sbuf;
 			end = MIN(end, lbuf_len(xb));
 			dwid2 = itoalen(end);
 			dwid1 = max == INT_MAX ? dwid2 : MIN(dwid1, dwid2);
 			for (pos = beg; c < max && pos < end; pos++) {
 				path = xb->ln[pos];
-				if (rset_match(rs, path, 0)) {
+				if (rstr_match(rs, path, 0)) {
 					sbuf_mem(sb, &pos, sizeof(pos))
 					p = itoa(c++, buf);
 					int z, wid = p - buf;
@@ -527,7 +527,7 @@ static void *ec_fuzz(char *loc, char *cmd, char *arg)
 				break;
 			}
 		}
-		rset_free(rs);
+		rstr_free(rs);
 		sbuf_cut(sb, 0)
 		if (pflg) {
 			term_clean();
@@ -554,7 +554,7 @@ static void *ec_fuzz(char *loc, char *cmd, char *arg)
 	free(sb->s);
 	path = lbuf_get(xb, lnum);
 	if (*cmd == 'f' && path) {
-		rset_find(rs, path, subs, 0);
+		rstr_find(rs, path, subs, 0);
 		xrow = lnum;
 		xoff = uc_off(path, subs[0]);
 	} else if (path) {
@@ -563,7 +563,7 @@ static void *ec_fuzz(char *loc, char *cmd, char *arg)
 		path[lbuf_s(path)->len] = '\n';
 	} else if (*cmd != 'f')
 		temp_switch(1, 1);
-	rset_free(rs);
+	rstr_free(rs);
 	return sret;
 }
 
@@ -583,15 +583,15 @@ static void *ec_find(char *loc, char *cmd, char *arg)
 	ex_krsset(arg, dir);
 	if (!xkwdrs)
 		return xserr;
-	else if (xgrp >= xkwdrs->nsubc)
+	else if (xgrp >= (xkwdrs->rs ? xkwdrs->rs->nsubc : 2))
 		return xgerr;
 	if (xfr) {
-		int offs[xkwdrs->nsubc];
+		int offs[xkwdrs->rs ? xkwdrs->rs->nsubc : 2];
 		sbuf *sb = ex_regget(xfr);
 		if (!sb)
 			return "uninitialized register";
 		if (!*loc || e == 2) {
-			if (rset_find(xkwdrs, sb->s, offs, 0) < 0 || offs[xgrp] < 0)
+			if (rstr_find(xkwdrs, sb->s, offs, 0) < 0 || offs[xgrp] < 0)
 				return xuerr;
 			return NULL;
 		}
@@ -600,7 +600,7 @@ static void *ec_find(char *loc, char *cmd, char *arg)
 		off = pin ? 0 : lbuf_pos2off(xb, beg, o1, end - 1, o2,
 				xrow, xoff + (cmd[1] == '+'));
 		if (off < 0 || off >= sb->s_n
-				|| rset_find(xkwdrs, sb->s + off, offs, 0) < 0
+				|| rstr_find(xkwdrs, sb->s + off, offs, 0) < 0
 				|| offs[xgrp] < 0
 				|| lbuf_off2pos(xb, beg, o1, end - 1, o2,
 						off + offs[xgrp], &xrow, &xoff))
@@ -1124,7 +1124,7 @@ static void *ec_substitute(char *loc, char *cmd, char *arg)
 	int beg, end, o1 = -1, o2 = -2, flg, grp, reg = -1;
 	char *pat, *rep = NULL, *_rep, *p, *err = NULL;
 	char *s = arg;
-	rset *rs = xkwdrs;
+	rstr *rs = xkwdrs;
 	int i, first = -1, last = 0;
 	struct lopt *lo;
 	sbuf text, *rb;
@@ -1133,10 +1133,10 @@ static void *ec_substitute(char *loc, char *cmd, char *arg)
 		return xrerr;
 	pat = ex_re_read(&s);
 	if (pat && (*pat || !rs))
-		rs = rset_smake(pat, xic ? REG_ICASE : 0);
-	if (!rs || xgrp >= rs->nsubc) {
+		rs = rstr_make(pat, xic ? REG_ICASE : 0);
+	if (!rs || xgrp >= (rs->rs ? rs->rs->nsubc : 2)) {
 		if (rs != xkwdrs)
-			rset_free(rs);
+			rstr_free(rs);
 		free(pat);
 		return rs ? xgerr : xserr;
 	}
@@ -1145,7 +1145,7 @@ static void *ec_substitute(char *loc, char *cmd, char *arg)
 		rep = ex_re_read(&s);
 	}
 	free(pat);
-	int offs[rs->nsubc];
+	int offs[rs->rs ? rs->rs->nsubc : 2];
 	char *lnb, *ln, *suf = "", *fr = NULL;
 	int b1 = 0, pend, rflg = REG_NEWLINE, hit = 0;
 	sbuf_smake(r, 256)
@@ -1203,7 +1203,7 @@ static void *ec_substitute(char *loc, char *cmd, char *arg)
 		hit = 0;
 		sbuf_cut(r, 0)
 		lnb = ln - b1;		/* start of text not yet copied */
-		while (rset_find(rs, ln, offs, rflg) >= 0) {
+		while (rstr_find(rs, ln, offs, rflg) >= 0) {
 			if (!(flg & 4))	/* only the first search is at bol */
 				rflg |= REG_NOTBOL;
 			if (offs[xgrp] < 0) {
@@ -1220,10 +1220,10 @@ static void *ec_substitute(char *loc, char *cmd, char *arg)
 					}
 					grp = *_rep - '0';
 					while (grp && uc_isdigit(_rep[1]) &&
-						(grp * 10 + _rep[1] - '0') < (rs->nsubc >> 1))
+						(grp * 10 + _rep[1] - '0') < ((rs->rs ? rs->rs->nsubc : 2) >> 1))
 						grp = grp * 10 + *++_rep - '0';
 					grp *= 2;
-					if (grp + 1 >= rs->nsubc)
+					if (grp + 1 >= (rs->rs ? rs->rs->nsubc : 2))
 						sbuf_chr(r, *_rep)
 					else if (offs[grp] >= 0)
 						sbuf_mem(r, ln + offs[grp], offs[grp + 1] - offs[grp])
@@ -1272,7 +1272,7 @@ static void *ec_substitute(char *loc, char *cmd, char *arg)
 	free(fr);
 	free(r->s);
 	if (rs != xkwdrs)
-		rset_free(rs);
+		rstr_free(rs);
 	free(rep);
 	return err ? err : first < 0 ? xuerr : NULL;
 }
@@ -1338,7 +1338,7 @@ static void *ec_glob(char *loc, char *cmd, char *arg)
 	int i, beg, end, not;
 	void *ret = xuerr;
 	char *pat, *s = arg;
-	rset *rs;
+	rstr *rs;
 	if (!loc[0] && !xgdep)
 		loc = "%";
 	if (ex_vregion(loc, &beg, &end))
@@ -1346,9 +1346,9 @@ static void *ec_glob(char *loc, char *cmd, char *arg)
 	not = !!strchr(cmd, '!');
 	pat = ex_re_read(&s);
 	if (pat && *pat)
-		rs = rset_smake(pat, xic ? REG_ICASE : 0);
+		rs = rstr_make(pat, xic ? REG_ICASE : 0);
 	else
-		rs = rset_smake(ex_regget('/') ? ex_regget('/')->s : "", xic ? REG_ICASE : 0);
+		rs = rstr_make(ex_regget('/') ? ex_regget('/')->s : "", xic ? REG_ICASE : 0);
 	free(pat);
 	if (!rs)
 		return xserr;
@@ -1358,7 +1358,7 @@ static void *ec_glob(char *loc, char *cmd, char *arg)
 	for (i = beg; i < lbuf_len(xb);) {
 		char *ln = lbuf_get(xb, i);
 		lbuf_s(ln)->grec &= ~xgdep;
-		if (rset_match(rs, ln, REG_NEWLINE) != not) {
+		if (rstr_match(rs, ln, REG_NEWLINE) != not) {
 			xrow = i;
 			if ((ret = ex_exec(s)))
 				break;
@@ -1367,7 +1367,7 @@ static void *ec_glob(char *loc, char *cmd, char *arg)
 		while (i < lbuf_len(xb) && !(lbuf_i(xb, i)->grec & xgdep))
 			i++;
 	}
-	rset_free(rs);
+	rstr_free(rs);
 	xgdep /= 2;
 	return ret;
 }
@@ -1510,10 +1510,10 @@ static void *ec_chdir(char *loc, char *cmd, char *arg)
 
 static void *ec_setincl(char *loc, char *cmd, char *arg)
 {
-	rset_free(fsincl);
+	rstr_free(fsincl);
 	if (!*arg)
 		fsincl = NULL;
-	else if (!(fsincl = rset_smake(arg, xic ? REG_ICASE : 0)))
+	else if (!(fsincl = rstr_make(arg, xic ? REG_ICASE : 0)))
 		return xserr;
 	return NULL;
 }
