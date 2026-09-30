@@ -1189,8 +1189,23 @@ static int vi_region(int cmd, int *row, int *off)
 	case 'w':
 	case 'W':
 		var = mv == 'W';
+		if (cmd >= 0 && cnt == 1)
+			dir = 2;
+		else
+			dir = vi_nlmode+1;
+		if (cmd == 'c') {
+			/* vim: cw/cW acts like ce/cE (no trailing whitespace) */
+			int prow = *row, poff = *off;
+			for (i = 0; i < cnt; i++)
+				if (lbuf_wordend(xb, var, dir, row, off))
+					break;
+			if (prow == *row)
+				return mv == 'w' ? 'e' : 'E';
+			*row = prow;
+			*off = poff;
+		}
 		for (i = 0; i < cnt; i++)
-			if (lbuf_wordbeg(xb, var, vi_nlmode+1, row, off))
+			if (lbuf_wordbeg(xb, var, dir, row, off))
 				break;
 		break;
 	case '(':
