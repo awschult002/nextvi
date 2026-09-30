@@ -1,68 +1,83 @@
-int opt_left_col;			/* the first visible column */
-int opt_startup_flags;			/* startup flags */
-int opt_autoindent = 1;			/* autoindent option */
-int opt_ignorecase = 1;			/* ignorecase option */
-int opt_syntax_hl = 1;			/* syntax highlight option */
-int opt_hl_line;			/* highlight current line */
-int opt_hl_word;			/* highlight current word */
-int opt_hl_pair;			/* highlight {}[]() pair */
-int opt_hl_reverse;			/* highlight text in reverse direction */
-int opt_line_editor = 1;			/* use the line editor */
-int opt_text_dir = +1;			/* current text direction */
-int opt_shaping = 1;			/* perform letter shaping */
-int opt_reorder = 1;			/* change the order of characters */
-int opt_tabstop = 8;			/* number of spaces for tab */
-int opt_interactive_shell;			/* interactive shell */
-int opt_search_group;			/* regex search group */
-int opt_print_autocomplete;			/* print autocomplete options */
-int opt_multiline_prompt;			/* whether to prompt after printing > 1 lines in vi */
-int opt_print_reg;			/* ex_cprint register */
-int opt_render_limit = -1;			/* rendering cutoff for non cursor lines */
-int opt_undo_seq = 1;			/* undo/redo sequence */
-int opt_error_mode = 1;			/* error handling -
-				bit 1: print errors, bit 2: early return, bit 3: ignore errors */
-int opt_find_reg;			/* ec_find register */
-int opt_record_reg;			/* record register */
+/**
+ * @file ex.c
+ * @brief Ex command mode: option and editor-state globals, buffer list,
+ * registers, address parsing, and every ":" command (table excmds[]).
+ *
+ * Commands have the signature `void *ec_x(char *loc, char *cmd, char *arg)`:
+ * loc is the address text before the command, cmd the matched command name,
+ * arg the expanded argument. They return NULL on success or an error string.
+ * Row ranges are half-open [beg, end); o1/o2 are character offsets (-1 = unset).
+ */
 
-int quit_state;			/* exit if positive, force quit or unwind if negative */
-int cursor_row, cursor_off, view_top_row;		/* current row, column, and top row */
-int buf_count;			/* number of active buffers */
-int vi_ex_depth;			/* global vi/ex recursion depth */
-int cur_keymap;			/* the current keymap */
-int keymap_alt = 1;		/* the alternate keymap */
-int search_dir;			/* the last search direction */
-int search_changes;			/* number of search kwd changes */
-int print_newline;			/* tracks newline from ex print and pipe stdout */
-int ex_separator = ':';			/* ex command separator */
-int ex_escape = '\\';		/* ex command arg escape character */
-int ex_exec_depth;			/* ex_exec recursion depth */
-sbuf *autocomplete_filter;			/* autocomplete db filter regex */
-rset *search_rset;			/* the last searched keyword rset */
-sbuf **str_registers;			/* string registers */
-int str_registers_n;			/* allocated register count */
-int default_reg;			/* ex default register */
-struct buf *bufs;		/* main buffers */
-struct buf tempbufs[3];		/* temporary buffers, for internal use */
-struct buf *cur_buf;		/* current buffer */
-struct buf *prev_buf;		/* prev buffer */
-static struct buf *ex_tpbuf;	/* temp prev buffer */
-static int bufs_max;		/* number of buffers */
-static int bufs_alloc = 10;	/* initial number of buffers */
-static int global_depth;		/* global command recursion depth */
-static int ex_expand_char = '%';		/* ex command internal state expand  */
-static int ex_shell_char = '!';		/* ex command external command expand */
-static char xuerr[] = "unreported error";
-static char xserr[] = "syntax error";
-static char xgerr[] = "invalid grp";
-static char xirerr[] = "invalid range";
-static char *xrerr;
-static void *ex_prev_ret;		/* previous ex command return value */
-static signed char *capture_status;	/* capture status by id, -1 if unset */
-static unsigned int capture_n;	/* number of allocated capture ids */
-static int capture_keep;		/* keep capture statuses across ex_exec calls */
-static int quit_propagate;		/* number of ex_exec levels :q propagates */
+int opt_left_col;	///< first visible screen column, horizontal scroll (was xleft)
+int opt_startup_flags;	///< mode bits: 1 raw ex I/O without line editor (-s), 2 ex mode instead of vi (-e), 4 no file message on load (-m, cleared after startup), 8 alternate screen (-a) (was xvis)
+int opt_autoindent = 1;	///< autoindent option (was xai)
+int opt_ignorecase = 1;	///< case-insensitive regex search (was xic)
+int opt_syntax_hl = 1;	///< 1: patterns and led extensions, other >0: extensions only, 0: off (was xhl)
+int opt_hl_line;	///< highlight current line (was xhll)
+int opt_hl_word;	///< highlight the word under the cursor; value is the word count (was xhlw)
+int opt_hl_pair;	///< highlight {}[]() pair (was xhlp)
+int opt_hl_reverse;	///< highlight text rendered in reverse direction (was xhlr)
+int opt_line_editor = 1;	///< use the line editor; 0 disables all terminal output (was xled)
+int opt_text_dir = +1;	///< text direction: +1/-1 default LTR/RTL with per-line detection, +2/-2 forced (was xtd)
+int opt_shaping = 1;	///< perform Arabic letter shaping (was xshape)
+int opt_reorder = 1;	///< bidi: reorder characters per dmarks[] (was xorder)
+int opt_tabstop = 8;	///< number of spaces for tab (was xts)
+int opt_interactive_shell;	///< run the shell with -i (was xish)
+int opt_search_group;	///< regex group used as match position, stored as group*2 (index into offs[]) (was xgrp)
+int opt_print_autocomplete;	///< print autocomplete options while inserting (was xpac)
+int opt_multiline_prompt;	///< counts lines printed from vi; >1 prompts "[any key to continue]", <0 disables (was xmpt)
+int opt_print_reg;	///< if >0, ex_cprint() also appends printed text to this register (was xpr)
+int opt_render_limit = -1;	///< max characters rendered on non-cursor lines, -1 = no limit (was xlim)
+int opt_undo_seq = 1;	///< added to lbuf useq after each command; 0 merges commands into one undo step, <0 disables history (was xseq)
+int opt_error_mode = 1;	///< error handling bits: 1 print errors, 2 stop the command chain on error, 4 ex_exec() always reports success (was xerr)
+int opt_find_reg;	///< if set, :f searches the text of this register instead of the buffer (was xfr)
+int opt_record_reg;	///< register receiving raw keystrokes while recording, 0 = off (was xrr)
 
-/* parity rule: delim halves escapes, odd keeps delim literal */
+int quit_state;	///< exit if positive (value-1 is the exit code), force quit or unwind if negative, see ec_quit() (was xquit)
+int cursor_row;		///< cursor row, 0-based line index in the current buffer (was xrow)
+int cursor_off;		///< cursor position as a character index into the line (not bytes or screen column); indexes rstate->chrs[] (was xoff)
+int view_top_row;	///< buffer row shown on the first screen line (was xtop)
+int buf_count;	///< number of used entries in bufs[] (was xbufcur)
+int vi_ex_depth;	///< nesting depth of vi()/ex() main loops (was xgrec)
+int cur_keymap;	///< index of the active keymap in kmaps[], 0 = en (was xkmap)
+int keymap_alt = 1;	///< keymap selected by ^f (was xkmap_alt)
+int search_dir;	///< last search direction, +1/-1, 0 = none yet (was xkwddir)
+int search_changes;	///< incremented whenever search_rset is rebuilt (was xkwdcnt)
+int print_newline;	///< tracks newline from ex print and pipe stdout (was xpln)
+int ex_separator = ':';	///< ex command separator (was xsep)
+int ex_escape = '\\';	///< ex command arg escape character (was xesc)
+int ex_exec_depth;	///< ex_exec() recursion depth (was xexec_dep)
+sbuf *autocomplete_filter;	///< regex choosing autocomplete words, NULL = default word regex (was xacreg)
+rset *search_rset;	///< compiled last search keyword (was xkwdrs)
+sbuf **str_registers;	///< string registers indexed by register id; entries may be NULL (was xregs)
+int str_registers_n;	///< allocated length of str_registers[] (was xregs_n)
+int default_reg;	///< register used when none is given (was xdefreg)
+struct buf *bufs;	///< main buffers, bufs_max entries, buf_count used
+struct buf tempbufs[3];	///< internal buffers: 0 "/hist/" prompt history, 1 "/fm/" file list, 2 "/sc/" scratch
+struct buf *cur_buf;	///< current buffer, points into bufs[] or tempbufs[] (was ex_buf)
+struct buf *prev_buf;	///< previous buffer, for ^^ and %# (was ex_pbuf)
+static struct buf *ex_tpbuf;	///< prev_buf saved on entering a temp buffer, restored on leaving it
+static int bufs_max;	///< capacity of bufs[], set by :bx (was xbufsmax)
+static int bufs_alloc = 10;	///< default capacity for :bx without argument (was xbufsalloc)
+static int global_depth;	///< :g nesting as a single bit (1, 2, 4...) used to tag lines in linfo.grec (was xgdep)
+static int ex_expand_char = '%';	///< ex command internal state expand character (was xexp)
+static int ex_shell_char = '!';	///< ex command external command expand character (was xexe)
+static char xuerr[] = "unreported error";	///< generic failure; also returned after the real message was printed
+static char xserr[] = "syntax error";	///< error message
+static char xgerr[] = "invalid grp";	///< error message: opt_search_group beyond the regex's groups
+static char xirerr[] = "invalid range";	///< error message
+static char *xrerr;	///< last address error, set by ex_region()/ex_range()
+static void *ex_prev_ret;	///< previous ex command return value, NULL = success (was xpret)
+static signed char *capture_status;	///< status by id recorded by :??: 1 failed, 0 succeeded (inverted by !), -1 unset (was xcid)
+static unsigned int capture_n;	///< number of allocated capture ids (was xcid_n)
+static int capture_keep;	///< keep capture statuses across top-level ex_exec calls (was xcid_keep)
+static int quit_propagate;	///< number of ex_exec levels :q propagates (was xqprop)
+
+/* parity rule: delim halves escapes, odd keeps delim literal.
+ * n = run of esc chars at p. If dtest (usually p[n] is a delimiter) emit
+ * ceil(n/2) of them; if n is odd the last emitted esc is overwritten by the
+ * delimiter, which is consumed as a literal. Otherwise copy all n. */
 #define ex_parity(p, sb, esc, dtest) \
 int n = 0, keep, d; \
 for (; p[n] == esc; n++); \
@@ -75,7 +90,7 @@ if (d && keep & 1) \
 	sb->s[sb->s_n - 1] = p[keep++]; \
 p += keep; \
 
-/* read a sub expression enclosed in a delimiter */
+/** @brief Read text up to an unescaped delim into sb (NUL-terminated); *src ends past the delim. */
 static void ex_sread(sbuf *sb, char **src, int delim, int esc)
 {
 	char *s = *src;
@@ -90,7 +105,7 @@ static void ex_sread(sbuf *sb, char **src, int delim, int esc)
 	sbuf_nul(sb)
 }
 
-/* allocate & read a sub expression enclosed in a delimiter */
+/** @brief Like ex_sread() but returns a new malloc'd string. */
 static char *ex_se_read(char **src, int delim, int esc)
 {
 	sbuf_smake(sb, 256)
@@ -98,7 +113,7 @@ static char *ex_se_read(char **src, int delim, int esc)
 	return sb->s;
 }
 
-/* allocate & read a regular expression enclosed in a delimiter */
+/** @brief Read a regex delimited by its first char (e.g. /re/); NULL if *src is empty. */
 static char *ex_re_read(char **src)
 {
 	int delim = **src;
@@ -108,6 +123,7 @@ static char *ex_re_read(char **src)
 	return ex_se_read(src, delim, '\\');
 }
 
+/** @brief Compare two strings back to front; 0 only if equal and nonempty. */
 static int rstrcmp(const char *s1, const char *s2, int l1, int l2)
 {
 	if (l1 != l2 || !l1)
@@ -118,6 +134,7 @@ static int rstrcmp(const char *s1, const char *s2, int l1, int l2)
 	return 0;
 }
 
+/** @brief Index of the buffer whose path is path, or -1. */
 static int bufs_find(const char *path, int len)
 {
 	for (int i = 0; i < buf_count; i++)
@@ -126,12 +143,14 @@ static int bufs_find(const char *path, int len)
 	return -1;
 }
 
+/** @brief Free the path and line buffer of bufs[idx]. */
 static void bufs_free(int idx)
 {
 	free(bufs[idx].path);
 	lbuf_free(bufs[idx].lb);
 }
 
+/** @brief File modification time, -1 if stat() fails. */
 static long mtime(char *path)
 {
 	struct stat st;
@@ -140,6 +159,10 @@ static long mtime(char *path)
 	return -1;
 }
 
+/**
+ * @brief Make bufs[idx] current, saving the cursor of the old buffer.
+ * prev_buf is updated, skipping temp buffers.
+ */
 void bufs_switch(int idx)
 {
 	if (cur_buf != &bufs[idx]) {
@@ -153,6 +176,11 @@ void bufs_switch(int idx)
 	exbuf_load(cur_buf)
 }
 
+/**
+ * @brief Allocate a buffer entry for path (not read yet).
+ * When bufs[] is full the last entry is freed and reused.
+ * @return index of the new entry
+ */
 static int bufs_open(const char *path, int len)
 {
 	int i = buf_count;
@@ -171,6 +199,7 @@ static int bufs_open(const char *path, int len)
 	return i;
 }
 
+/** @brief Initialize tempbufs[i] with an empty lbuf. */
 void temp_open(int i, char *name, char *ft)
 {
 	tempbufs[i].path = uc_dup(name);
@@ -183,6 +212,7 @@ void temp_open(int i, char *name, char *ft)
 	tempbufs[i].ft = ft;
 }
 
+/** @brief Set the saved cursor of tempbufs[i]; row < 0 means its last line. */
 void temp_pos(int i, int row, int off, int top)
 {
 	if (row < 0)
@@ -192,6 +222,10 @@ void temp_pos(int i, int row, int off, int top)
 	tempbufs[i].top = top;
 }
 
+/**
+ * @brief Enter tempbufs[i]; if it is already current and swap is set,
+ * return to the buffer that was current before.
+ */
 void temp_switch(int i, int swap)
 {
 	if (cur_buf == &tempbufs[i]) {
@@ -212,6 +246,7 @@ void temp_switch(int i, int swap)
 	syn_setft(xb_ft);
 }
 
+/** @brief Insert str after the saved row of tempbufs[i] and advance that row. */
 void temp_write(int i, char *str)
 {
 	if (!*str)
@@ -222,7 +257,11 @@ void temp_write(int i, char *str)
 	lbuf_edit(lb, str, tempbufs[i].row, tempbufs[i].row, 0, 0);
 }
 
-/* set the current search keyword rset if the kwd or flags changed */
+/**
+ * @brief Set the current search keyword rset if the kwd or flags changed.
+ * @param kwd  regex, NULL or "" keeps the current one
+ * @param dir  +-1: direction stored only when kwd changes; +-2: always set to dir/2
+ */
 void ex_krsset(char *kwd, int dir)
 {
 	sbuf *reg = ex_regget('/');
@@ -238,6 +277,17 @@ void ex_krsset(char *kwd, int dir)
 		search_dir = dir / 2;
 }
 
+/**
+ * @brief Parse one address at *num and advance *num past it.
+ *
+ * Forms: `.` `$` `'N` (mark) `>re>` `<re<` (search) digits, then any
+ * `+N -N *N /N %N` arithmetic. `%` is "last line" only at the start (ploc).
+ * @param ploc  start of the whole address list
+ * @param[in,out] num  parse position
+ * @param n    value of `.` (current row, or current offset if row given)
+ * @param row  NULL: parse a line number; else parse a character offset in *row
+ * @return the address, or -2 on error (xrerr set)
+ */
 static int ex_range(char *ploc, char **num, int n, int *row)
 {
 	int dir, off, beg, end;
@@ -316,8 +366,18 @@ static int ex_range(char *ploc, char **num, int n, int *row)
 	return n;
 }
 
-/* parse ex command addresses */
+/** @brief ex_region() for rows only; horizontal addresses go to cursor_off. */
 #define ex_vregion(loc, beg, end) ex_region(loc, beg, end, &cursor_off, &cursor_off)
+/**
+ * @brief Parse an address list: `a,b` rows, `;x;y` character offsets,
+ * `|cmd|` ex commands run while parsing. `,#`/`;#` continue from the previous value.
+ * Numeric row addresses are 1-based (adj subtracts 1).
+ * @param loc  the address list text
+ * @param[out] beg,end  half-open row range; defaults to the cursor row
+ * @param[out] o1,o2    character offsets, untouched unless given
+ * @return 0 if valid; else 1, or 2 (no row address but a |cmd| ran),
+ *         or 3 (a single numeric row address out of range, e.g. 0)
+ */
 static int ex_region(char *loc, int *beg, int *end, int *o1, int *o2)
 {
 	int vaddr = *loc == '%', haddr = 0, update = 0;
@@ -373,6 +433,11 @@ static int ex_region(char *loc, int *beg, int *end, int *o1, int *o2)
 		*end <= *beg || *end > lbuf_len(xb)) * ret;
 }
 
+/**
+ * @brief Read one line of ex input into sb, prompting with msg.
+ * In raw mode (opt_startup_flags & 1) bytes are read with term_read().
+ * @return the key that ended input ('\n' on accept)
+ */
 static int ex_read(sbuf *sb, char *msg, ins_state *is, int ps, int flg)
 {
 	int n = sb->s_n, key;
@@ -392,6 +457,7 @@ static int ex_read(sbuf *sb, char *msg, ins_state *is, int ps, int flg)
 	return key;
 }
 
+/** Read xb_path appending to the current buffer; errchk receives lbuf_rd()'s result. */
 #define readfile(errchk) \
 fd = open(xb_path, O_RDONLY); \
 if (fd >= 0) { \
@@ -399,6 +465,10 @@ if (fd >= 0) { \
 	close(fd); \
 } \
 
+/**
+ * @brief Switch to the buffer for path, opening and reading it if needed.
+ * @return 1 if it was already open, 0 if a new buffer was created
+ */
 int ex_edit(const char *path, int len)
 {
 	int fd;
@@ -415,6 +485,7 @@ int ex_edit(const char *path, int len)
 	return 0;
 }
 
+/** @brief `:e[!] [path]` edit a file. */
 static void *ec_edit(char *loc, char *cmd, char *arg)
 {
 	char msg[512];
@@ -445,6 +516,11 @@ static void *ec_edit(char *loc, char *cmd, char *arg)
 	return (fd < 0 || rd) && *arg ? xuerr : NULL;
 }
 
+/**
+ * @brief `:f [re]` / `:ef[!] [re]` interactive regex filter of lines.
+ * `f` jumps to a line in the current buffer; `ef` filters the file list
+ * (tempbufs[1]) and opens the chosen file.
+ */
 static void *ec_fuzz(char *loc, char *cmd, char *arg)
 {
 	rset *rs;
@@ -487,6 +563,7 @@ static void *ec_fuzz(char *loc, char *cmd, char *arg)
 			for (pos = beg; c < max && pos < end; pos++) {
 				path = xb->ln[pos];
 				if (rset_match(rs, path, 0)) {
+					/* sb collects the matching row numbers as raw ints, read back below */
 					sbuf_mem(sb, &pos, sizeof(pos))
 					p = itoa(c++, buf);
 					int z, wid = p - buf;
@@ -564,6 +641,7 @@ static void *ec_fuzz(char *loc, char *cmd, char *arg)
 	return sret;
 }
 
+/** @brief `:f+ :f- :f> :f<` regex search within a range (or in opt_find_reg). */
 static void *ec_find(char *loc, char *cmd, char *arg)
 {
 	int e, pskip, nskip, dir, off, nbeg, beg, end, o1 = 0, o2 = -1;
@@ -625,6 +703,7 @@ static void *ec_find(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:b [n]` list buffers or switch to one; negative n selects tempbufs[-n-1]. */
 static void *ec_buffer(char *loc, char *cmd, char *arg)
 {
 	int n = atoi(arg);
@@ -650,6 +729,7 @@ static void *ec_buffer(char *loc, char *cmd, char *arg)
 	return "no such buffer";
 }
 
+/** @brief `:q[!] [code]`; a numeric loc sets how many ex_exec levels it propagates. */
 static void *ec_quit(char *loc, char *cmd, char *arg)
 {
 	if (ex_exec_depth == 1 && vi_ex_depth == 1 && !strchr(cmd, '!') && quit_state >= 0)
@@ -667,6 +747,7 @@ static void *ec_quit(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief After a load: refresh mtime and filetype, mark saved (clear drops undo history). */
 void ex_bufpostfix(struct buf *p, int clear)
 {
 	p->mtime = mtime(p->path);
@@ -674,6 +755,7 @@ void ex_bufpostfix(struct buf *p, int clear)
 	lbuf_saved(p->lb, clear);
 }
 
+/** @brief `:bp path` set the current buffer's path. */
 static void *ec_setpath(char *loc, char *cmd, char *arg)
 {
 	free(xb_path);
@@ -682,6 +764,10 @@ static void *ec_setpath(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/**
+ * @brief `:r [file|!cmd]` insert a file or command output before the cursor row.
+ * xb temporarily points at the new text so loc addresses that text.
+ */
 static void *ec_read(char *loc, char *cmd, char *arg)
 {
 	sbuf obuf, *sb;
@@ -732,6 +818,7 @@ static void *ec_read(char *loc, char *cmd, char *arg)
 	return ret;
 }
 
+/** @brief Run cmd with buf (may be NULL) as stdin; its output goes to the terminal. */
 static void *ex_pipeout(char *cmd, sbuf *buf)
 {
 	int ret = 0;
@@ -750,6 +837,7 @@ static void *ex_pipeout(char *cmd, sbuf *buf)
 	return ret ? xuerr : NULL;
 }
 
+/** @brief `:w :wq :x [!] [file|!cmd]` write the buffer or a range. */
 static void *ec_write(char *loc, char *cmd, char *arg)
 {
 	char msg[512], *path, *ret = NULL;
@@ -813,6 +901,7 @@ static void *ec_write(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:@ keys` / `:& keys` run keys as vi input via term_exec(). */
 static void *ec_termexec(char *loc, char *cmd, char *arg)
 {
 	if (*arg && term_sbuf)
@@ -820,6 +909,15 @@ static void *ec_termexec(char *loc, char *cmd, char *arg)
 	return term_sbuf ? NULL : "unsupported command";
 }
 
+/**
+ * @brief Print a line to the message area or ex output.
+ * @param line  text to print
+ * @param ft    filetype for highlighting, NULL keeps the current one
+ * @param r,c   screen row (-1 = current) and column
+ * @param left  first visible column of line
+ * @param flg   nonzero: go to the bottom row first; 1 also counts toward
+ *              opt_multiline_prompt, 2 always emits a newline
+ */
 void ex_cprint(char *line, char *ft, int r, int c, int left, int flg)
 {
 	if (opt_print_reg > 0) {
@@ -851,6 +949,10 @@ void ex_cprint(char *line, char *ft, int r, int c, int left, int flg)
 		term_chr('\n');
 }
 
+/**
+ * @brief `:i` insert text after the addressed lines, `:c` replace them
+ * (or the o1..o2 part). Text comes from arg or is read line by line.
+ */
 static void *ec_insert(char *loc, char *cmd, char *arg)
 {
 	int beg, end, o1 = -1, o2 = -1, ps = 0, key;
@@ -919,6 +1021,7 @@ static void *ec_insert(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:p [text]` print a range or text; a bare address just moves the cursor. */
 static void *ec_print(char *loc, char *cmd, char *arg)
 {
 	int i, beg, end, o1 = -1, o2 = -1;
@@ -960,6 +1063,7 @@ static void *ec_print(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:d` delete a range. */
 static void *ec_delete(char *loc, char *cmd, char *arg)
 {
 	int beg, end, o1 = -1, o2 = -1;
@@ -979,11 +1083,13 @@ static void *ec_delete(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief Register contents, or NULL if unset. */
 sbuf *ex_regget(int id)
 {
 	return id >= 0 && id < str_registers_n ? str_registers[id] : NULL;
 }
 
+/** @brief Set (or append to) register c, growing str_registers[] as needed. */
 void ex_regput(int c, const char *s, int append)
 {
 	sbuf *sb;
@@ -1004,6 +1110,7 @@ void ex_regput(int c, const char *s, int append)
 	sbuf_nul4(sb)
 }
 
+/** @brief `:ya[+] [reg]` yank a range (+ appends); `:ya! reg` frees the register. */
 static void *ec_yank(char *loc, char *cmd, char *arg)
 {
 	int beg, end, o1 = 0, o2 = -1;
@@ -1026,6 +1133,7 @@ static void *ec_yank(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:pu [reg][!cmd]` put a register after the range, or pipe it to cmd. */
 static void *ec_put(char *loc, char *cmd, char *arg)
 {
 	int beg, end, i = 0, reg = default_reg;
@@ -1057,6 +1165,7 @@ static void *ec_put(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:= [0-3]` print the parsed range (beg, end, o1, o2); `:=?` print the last error. */
 static void *ec_num(char *loc, char *cmd, char *arg)
 {
 	if (cmd[1] == '?') {
@@ -1077,6 +1186,7 @@ static void *ec_num(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:ud` undo, `:rd` redo. */
 static void *ec_undoredo(char *loc, char *cmd, char *arg)
 {
 	int ref;
@@ -1084,12 +1194,14 @@ static void *ec_undoredo(char *loc, char *cmd, char *arg)
 		xuerr : NULL;
 }
 
+/** @brief `:bs [x]` mark buffer saved; an argument also clears undo history. */
 static void *ec_bufsave(char *loc, char *cmd, char *arg)
 {
 	lbuf_saved(xb, *arg);
 	return NULL;
 }
 
+/** @brief `:m ids...` set marks at range start/end alternately; `:m!` with no ids clears all. */
 static void *ec_mark(char *loc, char *cmd, char *arg)
 {
 	int beg, end, o1 = cursor_off, o2 = cursor_off;
@@ -1115,6 +1227,11 @@ static void *ec_mark(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/**
+ * @brief `:s/re/rep/[flags]`. Flags: g all matches, m match the region as one
+ * string, ^ anchor every search at bol (implies g), digits: operate on that register.
+ * offs[] are byte offsets relative to ln.
+ */
 static void *ec_substitute(char *loc, char *cmd, char *arg)
 {
 	int beg, end, o1 = -1, o2 = -2, flg, grp, reg = -1;
@@ -1273,6 +1390,7 @@ static void *ec_substitute(char *loc, char *cmd, char *arg)
 	return err ? err : first < 0 ? xuerr : NULL;
 }
 
+/** @brief `:!cmd` run a command; with a range, filter the range through it. */
 static void *ec_exec(char *loc, char *cmd, char *arg)
 {
 	if (!*loc)
@@ -1299,6 +1417,7 @@ static void *ec_exec(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:ft [type]` set or print the filetype. */
 static void *ec_ft(char *loc, char *cmd, char *arg)
 {
 	int i;
@@ -1318,6 +1437,7 @@ static void *ec_ft(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:cm[!] [name]` set the alternate keymap (and activate it unless !). */
 static void *ec_cmap(char *loc, char *cmd, char *arg)
 {
 	if (arg[0])
@@ -1329,6 +1449,11 @@ static void *ec_cmap(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/**
+ * @brief `:g[!]/re/cmd` run cmd on matching (or non-matching) lines.
+ * Lines in range are tagged with the global_depth bit first, so lines the
+ * command inserts are skipped.
+ */
 static void *ec_glob(char *loc, char *cmd, char *arg)
 {
 	int i, beg, end, not;
@@ -1368,6 +1493,7 @@ static void *ec_glob(char *loc, char *cmd, char *arg)
 	return ret;
 }
 
+/** @brief Drop all capture statuses. */
 static void xcid_free(void)
 {
 	free(capture_status);
@@ -1375,6 +1501,7 @@ static void xcid_free(void)
 	capture_n = 0;
 }
 
+/** @brief `:?~` clear captures; `N:?~` unset id N; any arg toggles capture_keep. */
 static void *ec_xcid(char *loc, char *cmd, char *arg)
 {
 	if (*arg)
@@ -1388,6 +1515,14 @@ static void *ec_xcid(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/**
+ * @brief Conditionals and loops.
+ *  - `N:?` / `N:?!` run arg N times (`$` = forever) while it succeeds (! : fails).
+ *  - `:?? cmd` run cmd if the previous command succeeded (`??!`: failed).
+ *  - `id:??` record the previous command's status under id.
+ *  - `ids:?? cmd` run cmd if the recorded statuses pass (`,` = and, `;` = or);
+ *    `ids:???` only returns the result.
+ */
 static void *ec_while(char *loc, char *cmd, char *arg)
 {
 	int isdq = cmd[1] == '?';
@@ -1438,6 +1573,7 @@ static void *ec_while(char *loc, char *cmd, char *arg)
 	return ret;
 }
 
+/** @brief `:j [x]` join lines; an argument inserts spaces. */
 static void *ec_join(char *loc, char *cmd, char *arg)
 {
 	int beg, end, o2 = 0;
@@ -1447,8 +1583,10 @@ static void *ec_join(char *loc, char *cmd, char *arg)
 	return lbuf_join(xb, beg, end+1, cursor_off, &o2, arg[0]) ? xuerr : NULL;
 }
 
+/** @brief `:fp [dir]` set the default directory; `:fd [dir]` rebuild the file list. */
 static void *ec_setdir(char *loc, char *cmd, char *arg)
 {
+	/* directory remembered by :fp */
 	static char *exdir;
 	if (cmd[1] == 'p') {
 		free(exdir);
@@ -1458,6 +1596,7 @@ static void *ec_setdir(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:cd [dir]` and rewrite relative buffer paths to stay valid. */
 static void *ec_chdir(char *loc, char *cmd, char *arg)
 {
 	char oldpath[4096];
@@ -1489,6 +1628,7 @@ static void *ec_chdir(char *loc, char *cmd, char *arg)
 			opath = oldpath;
 			strncpy(opath+plen, bufs[i].path, sizeof(oldpath)-plen-1);
 		}
+		/* c: length of the common prefix; strip it if opath lies under newpath */
 		for (c = 0; opath[c] && opath[c] == newpath[c]; c++);
 		if (newpath[c] || !opath[c])
 			c = 0;
@@ -1502,6 +1642,7 @@ static void *ec_chdir(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:inc [re]` set the file filter for the file list (fsincl). */
 static void *ec_setincl(char *loc, char *cmd, char *arg)
 {
 	rset_free(fsincl);
@@ -1512,6 +1653,7 @@ static void *ec_setincl(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:ac [re]` set autocomplete_filter. */
 static void *ec_setacreg(char *loc, char *cmd, char *arg)
 {
 	if (autocomplete_filter)
@@ -1524,6 +1666,7 @@ static void *ec_setacreg(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:bx [n]` resize bufs[], keeping cur/prev pointers by index. */
 static void *ec_setbufsmax(char *loc, char *cmd, char *arg)
 {
 	int max = *arg ? atoi(arg) : bufs_alloc;
@@ -1544,6 +1687,7 @@ static void *ec_setbufsmax(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:reg` list registers; `N:reg[+] text` set/append; `N:reg` set default_reg. */
 static void *ec_regprint(char *loc, char *cmd, char *arg)
 {
 	if (*loc) {
@@ -1578,6 +1722,10 @@ static void *ec_regprint(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/**
+ * @brief `:ph cp1 cp2 wid len str` add a placeholder (no args: reset);
+ * `:uz` toggle zero-width, `:ub` toggle bell chars, `:uc` toggle utf-8 decoding.
+ */
 static void *ec_setenc(char *loc, char *cmd, char *arg)
 {
 	if (cmd[0] == 'p') {
@@ -1617,6 +1765,7 @@ static void *ec_setenc(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief `:sc[!] [chars]` set the escape, separator, expand and shell characters. */
 static void *ec_specials(char *loc, char *cmd, char *arg)
 {
 	static int *const sp[] = {&ex_escape, &ex_separator, &ex_expand_char, &ex_shell_char};
@@ -1633,6 +1782,7 @@ static void *ec_specials(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/** @brief Append [beg, end) escaped as a literal regex; ex also escapes ex specials. */
 void ex_regesc(sbuf *sb, char *beg, char *end, int ex)
 {
 	for (; beg < end; beg++) {
@@ -1649,6 +1799,7 @@ void ex_regesc(sbuf *sb, char *beg, char *end, int ex)
 	}
 }
 
+/** @brief `:re [kwd]` set the search keyword from arg or from the range text. */
 static void *ec_krsset(char *loc, char *cmd, char *arg)
 {
 	if (*arg && !*loc)
@@ -1669,6 +1820,7 @@ static void *ec_krsset(char *loc, char *cmd, char *arg)
 	return search_rset ? NULL : xserr;
 }
 
+/** @brief led extension for opt_hl_reverse: mark adjacent characters drawn in reversed order. */
 static void ext_hlr(led_ext *p, led_ctx *x)
 {
 	ren_state *r = x->r;
@@ -1688,12 +1840,14 @@ static void ext_hlr(led_ext *p, led_ctx *x)
 	}
 }
 
+/** @brief Option value: a number, else the code of the first character. */
 static int eo_val(char *arg)
 {
 	return uc_isdigit(*arg) || (*arg == '-' && uc_isdigit(arg[1])) ?
 		atoi(arg) : (unsigned char)*arg;
 }
 
+/* _EO/EO define eo_<opt>() handlers: set the variable from arg, or toggle it */
 #define _EO(opt, inner) \
 static void *eo_##opt(char *loc, char *cmd, char *arg) { inner }
 
@@ -1731,10 +1885,10 @@ _EO(left,
 #undef EO
 #define EO(opt) {#opt, eo_##opt}
 
-/* commands & opts must be sorted longest of its kind topmost */
+/** Command table, matched by prefix in order: sort longest of its kind topmost. */
 static struct excmd {
-	char *name;
-	void *(*ec)(char *loc, char *cmd, char *arg);
+	char *name;	///< command name
+	void *(*ec)(char *loc, char *cmd, char *arg);	///< handler
 } excmds[] = {
 	{"@", ec_termexec},
 	{"&", ec_termexec},
@@ -1830,7 +1984,14 @@ static struct excmd {
 	{"", ec_print}, /* do not remove */
 };
 
-/* parse command argument expanding % and ! */
+/**
+ * @brief Append the argument to sb, expanding `%` (path), `%#` (previous
+ * buffer), `%N` (bufs[N]), `%@N` (register N) and `!cmd!` (output).
+ * @param src  ex line at the argument
+ * @param sb   receives the expanded argument
+ * @param[out] arg  offset of the argument in sb
+ * @return src after the argument (at the separator or NUL)
+ */
 static const char *ex_arg(const char *src, sbuf *sb, int *arg)
 {
 	*arg = sb->s_n;
@@ -1882,7 +2043,13 @@ static const char *ex_arg(const char *src, sbuf *sb, int *arg)
 	return src;
 }
 
-/* parse prefix and command */
+/**
+ * @brief Copy the address prefix to sb (NUL-terminated) and find the command.
+ * @param src  ex line at the address prefix
+ * @param sb   receives the address prefix
+ * @param[in,out] idx  excmds[] index; LEN(excmds)-1 marks an empty command
+ * @return src after the command name
+ */
 static const char *ex_cmd(const char *src, sbuf *sb, int *idx)
 {
 	int i, j;
@@ -1925,7 +2092,7 @@ static const char *ex_cmd(const char *src, sbuf *sb, int *idx)
 	return src;
 }
 
-/* execute a single ex command chain */
+/** @brief Execute an ex command chain; returns NULL or an error string. */
 void *ex_exec(const char *ln)
 {
 	int arg, idx = 0;
@@ -1960,7 +2127,7 @@ void *ex_exec(const char *ln)
 	return opt_error_mode & 4 ? NULL : ret;
 }
 
-/* ex main loop */
+/** @brief Ex main loop: read and execute commands until quit_state is set. */
 void ex(void)
 {
 	vi_ex_depth++;
@@ -1985,6 +2152,7 @@ void ex(void)
 	vi_ex_depth--;
 }
 
+/** @brief Open the n files (at least one buffer) and run $EXINIT. */
 void ex_init(char **files, int n)
 {
 	bufs_alloc = MAX(n, bufs_alloc);
