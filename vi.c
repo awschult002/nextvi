@@ -1,3 +1,11 @@
+/**
+ * @file vi.c
+ * @brief Visual mode: main(), the normal-mode command loop vi(), screen
+ * drawing, motions and operators.
+ *
+ * The editor is built as one translation unit: this file includes vi.h and
+ * then every other .c file, so their statics are visible here.
+ */
 #include <ctype.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -23,28 +31,29 @@
 #include "term.c"
 #include "uc.c"
 
-int vi_hidch;			/* show hidden chars */
-int vi_lncol;			/* line numbers cursor offset */
-static int vi_lnnum;		/* line numbers */
-/* screen redraw - bit 1: whole screen, bit 2: current line, bit 3: update vi_col */
+int vi_hidch;	///< show hidden chars (V toggles)
+int vi_lncol;	///< width of the line-number column, added to the cursor column
+static int vi_lnnum;	///< line numbers set by #: 1 both for one command, bit 2 absolute, bit 4 relative (also at the indent), bit 8 relative
+/** screen redraw - bit 1: whole screen, bit 2: current line, bit 3: update vi_col; any nonzero value recomputes vi_col */
 static int vi_mod;
-static char vi_word_m[] = "\0leEwW";	/* line word navigation */
-static char *vi_word = vi_word_m;
-static char *_vi_word = vi_word_m;
-static int vi_wsel = 1;
-static int vi_rshift;			/* row shift for vi_word */
-static int vi_arg;			/* numeric argument */
-static char vi_charlast[5];		/* the last character searched via f, t, F, or T */
-static int vi_charcmd;			/* the character finding command */
-static int vi_ybuf;			/* current yank buffer, -1 if not given */
-static int vi_col;			/* the column requested by | command */
-static int vi_scrollud;			/* scroll amount for ^u and ^d */
-static int vi_scrolley;			/* scroll amount for ^e and ^y */
-static int vi_cndir = 1;		/* ^n direction */
-static int vi_status;			/* permanent status bar */
-static int vi_tsm;			/* type of the status message */
-static int vi_nlmode;			/* new line mode for vi regions */
+static char vi_word_m[] = "\0leEwW";	///< motion hint modes drawn under the cursor line (^v); "\0" = off
+static char *vi_word = vi_word_m;	///< current hint mode, points into vi_word_m
+static char *_vi_word = vi_word_m;	///< base of vi_word_m
+static int vi_wsel = 1;	///< last selected hint mode index (1..5)
+static int vi_rshift;	///< rows below the cursor are shifted down by 1 while the hint row is shown
+static int vi_arg;	///< numeric count prefix, 0 if none
+static char vi_charlast[5];	///< the last character searched via f, t, F, or T
+static int vi_charcmd;	///< the character finding command (f, t, F or T)
+static int vi_ybuf;	///< register from a "x prefix, -1 if not given
+static int vi_col;	///< desired screen column: set by | and kept across j/k
+static int vi_scrollud;	///< scroll amount for ^u and ^d, 0 = half screen
+static int vi_scrolley;	///< scroll amount for ^e and ^y
+static int vi_cndir = 1;	///< ^n buffer cycling direction
+static int vi_status;	///< permanent status bar shown (takes one row from xrows)
+static int vi_tsm;	///< type of the status message: 0 file info, 1 character info
+static int vi_nlmode;	///< 1: w/b/e and space motions do not cross line ends (toggled by vw)
 
+/** @brief malloc() that exits on failure. */
 void *emalloc(size_t size)
 {
 	void *p;
@@ -55,6 +64,7 @@ void *emalloc(size_t size)
 	return p;
 }
 
+/** @brief realloc() that exits on failure. */
 void *erealloc(void *p, size_t size)
 {
 	if (!(p = realloc(p, size))) {
@@ -75,6 +85,7 @@ static void reverse_in_place(char *str, int len)
 	}
 }
 
+/** @brief Write n in decimal to s; returns a pointer to the terminating NUL. */
 char *itoa(int n, char s[])
 {
 	int i = 0, sign;
@@ -90,6 +101,7 @@ char *itoa(int n, char s[])
 	return &s[i];
 }
 
+/** @brief Draw msg on the bottom (status) row. */
 static void vi_drawmsg(char *msg)
 {
 	syn_blockhl = -1;
@@ -102,6 +114,7 @@ static void vi_drawmsg(char *msg)
 }
 #define vi_drawmsg_mpt(msg) { vi_drawmsg(msg); if (!opt_multiline_prompt) opt_multiline_prompt = 1; }
 
+/** @brief Move *off to the character one screen column away in dir; -1 at the line end. */
 static int vi_nextcol(char *ln, int dir, int *off)
 {
 	int o = ren_off(ln, ren_next(ln, ren_pos(ln, *off), dir));
@@ -111,6 +124,8 @@ static int vi_nextcol(char *ln, int dir, int *off)
 	return 0;
 }
 
+/* Draw digit hints into tmp[] at the screen column of each successive
+ * position reached by the motion func (starting from the cursor). */
 #define vi_drawnum(func) \
 { \
 nrow = cursor_row; \
@@ -125,6 +140,7 @@ for (i = 0, ret = 0;; i++) { \
 	ret = func; \
 } } \
 
+/** @brief Draw buffer row on screen, with the motion hint row or line numbers if enabled. */
 static void vi_drawrow(int row)
 {
 	int l1, i, i1, lnnum = vi_lnnum;
@@ -189,6 +205,8 @@ static void vi_drawrow(int row)
 			i1 = itoalen(xrows);
 		}
 		*c = '\0';
+		/* l1: column width, padding the numbers to the digits of the widest
+		 * visible absolute (i) and relative (i1) numbers */
 		l1 = (c - tmp) + (i+i1 - (strlen(tmp) - !!i - !!i1));
 		vi_lncol = dir_context(s) < 0 ? 0 : l1;
 		memset(c, ' ', l1 - (c - tmp));
@@ -216,7 +234,7 @@ static void vi_drawrow(int row)
 	rstate = rstates;
 }
 
-/* redraw the screen */
+/** @brief Redraw screen rows from buffer row i to the bottom. */
 static void vi_drawagain(int i)
 {
 	syn_scdir(0);
@@ -224,7 +242,7 @@ static void vi_drawagain(int i)
 		vi_drawrow(i);
 }
 
-/* update the screen */
+/** @brief Scroll the screen by i rows (term_room) and draw only the uncovered rows. */
 static void vi_drawupdate(int i)
 {
 	int n;
@@ -242,6 +260,16 @@ static void vi_drawupdate(int i)
 	}
 }
 
+/**
+ * @brief Prompt on the bottom row.
+ * @param msg     prompt text shown before the input
+ * @param ft      filetype used to highlight the prompt line
+ * @param insert  initial text after msg, may be NULL
+ * @param[out] ret   1 if accepted with Enter
+ * @param[in,out] kmap  keymap index
+ * @param[out] mlen  length of msg; the input starts at the returned string + mlen
+ * @return malloc'd msg + input
+ */
 static char *vi_prompt(char *msg, char *ft, char *insert, int *ret, int *kmap, int *mlen)
 {
 	sbuf_smake(sb, xcols)
@@ -254,12 +282,14 @@ static char *vi_prompt(char *msg, char *ft, char *insert, int *ret, int *kmap, i
 	return sb->s;
 }
 
+/** @brief vi_prompt() with the ex filetype and the English keymap. */
 static char *vi_enprompt(char *msg, char *insert, int *ret, int *mlen)
 {
 	int kmap = 0;
 	return vi_prompt(msg, ex_ft, insert, ret, &kmap, mlen);
 }
 
+/** @brief Read an optional "x register prefix; -1 (key pushed back) if absent. */
 static int vi_yankbuf(int winch)
 {
 	int c = term_read(winch);
@@ -269,6 +299,7 @@ static int vi_yankbuf(int winch)
 	return -1;
 }
 
+/** @brief Read a numeric count; 0 if none. The key after it is consumed too; callers push it back with term_dec(). */
 static int vi_prefix(void)
 {
 	int n = 0;
@@ -282,6 +313,7 @@ static int vi_prefix(void)
 	return n;
 }
 
+/** @brief Read one digit key; -1 if not a digit. */
 static int vi_digit(void)
 {
 	int c = term_read(0);
@@ -290,12 +322,14 @@ static int vi_digit(void)
 	return -1;
 }
 
+/** @brief Character offset to screen column in row. */
 static int vi_off2col(struct lbuf *lb, int row, int off)
 {
 	char *ln = lbuf_get(lb, row);
 	return ln ? ren_pos(ln, off) : 0;
 }
 
+/** @brief Screen column to character offset in row (clamped to the line). */
 static int vi_col2off(struct lbuf *lb, int row, int col)
 {
 	char *ln = lbuf_get(lb, row);
@@ -307,6 +341,14 @@ static int vi_col2off(struct lbuf *lb, int row, int col)
 	return r->col[col];
 }
 
+/**
+ * @brief `/ ? n N` search cnt times from (*row, *off).
+ * @param cmd  '/' or '?' (prompt for a pattern), 'n' or 'N'
+ * @param cnt  repeat count
+ * @param[in,out] row,off  start position; set to the match
+ * @param msg  show messages; 0 is used for silent searches (file search)
+ * @return 0 if found
+ */
 static int vi_search(int cmd, int cnt, int *row, int *off, int msg)
 {
 	int i, dir, ret;
@@ -344,6 +386,10 @@ static int vi_search(int cmd, int cnt, int *row, int *off, int msg)
 	return 0;
 }
 
+/**
+ * @brief Regex for the word(s) at (row, off): `\<word\>` for n <= 1,
+ * else n words escaped with ex_regesc(). malloc'd, NULL if none.
+ */
 static char *vi_curword(struct lbuf *lb, int row, int off, int n, int ex)
 {
 	char *ln = lbuf_get(lb, row);
@@ -353,6 +399,7 @@ static char *vi_curword(struct lbuf *lb, int row, int off, int n, int ex)
 	char **chrs = rstate->chrs;
 	int cap = rstate->n;
 	int end = off;
+	/* [off, end): character range of the word; chrs[] gives its bytes */
 	for (int i = 0; i < n && end < cap; i++)
 		while (uc_kind(chrs[end++]) == 1);
 	for (; off > 0 && uc_kind(chrs[off - 1]) == 1; off--);
@@ -368,6 +415,10 @@ static char *vi_curword(struct lbuf *lb, int row, int off, int n, int ex)
 	sbufn_ret(sb, sb->s)
 }
 
+/**
+ * @brief Store s in register c like vi: linewise text shifts registers
+ * 1..9, otherwise the old content moves to '0'; uppercase c appends.
+ */
 static void vi_regput(int c, const char *s, int lnmode)
 {
 	sbuf *i_s;
@@ -381,10 +432,15 @@ static void vi_regput(int c, const char *s, int lnmode)
 	ex_regput(tolower(c), s, uc_isupper(c));
 }
 
-rset *fsincl;
-static int fspos;
-static int fsdir;
+rset *fsincl;	///< regex filter for files listed by dir_calc(), NULL = all
+static int fspos;	///< next index in the file list (tempbufs[1]) for ^] / ^p search
+static int fsdir;	///< direction of the last file search: 1, -1, or 0
 
+/**
+ * @brief Append all regular files under path (recursive) to tempbufs[1].
+ * Subdirectories are walked with explicit stacks: dps[] open dirs,
+ * ptrs[] their path buffers, plen[] their path lengths.
+ */
 void dir_calc(char *path)
 {
 	struct dirent *dirp;
@@ -440,6 +496,7 @@ void dir_calc(char *path)
 	free(sb->s);
 }
 
+/* Open path from the file list and search it; returns 1 from the caller on a hit. */
 #define fssearch() \
 len = lbuf_s(path)->len; \
 path[len] = '\0'; \
@@ -456,6 +513,7 @@ if (ret && cursor_row) { \
 if (!vi_search(*row ? 'N' : 'n', cnt, row, off, 0)) \
 	return 1; \
 
+/** @brief Search the keyword forward through the files in tempbufs[1], wrapping once. */
 static int fs_search(int cnt, int *row, int *off)
 {
 	char *path;
@@ -473,6 +531,7 @@ static int fs_search(int cnt, int *row, int *off)
 	return 0;
 }
 
+/** @brief Search the keyword backward through the files in tempbufs[1]. */
 static int fs_searchback(int cnt, int *row, int *off)
 {
 	char *path;
@@ -484,10 +543,12 @@ static int fs_searchback(int cnt, int *row, int *off)
 	return 0;
 }
 
-static char rep_cmd[sizeof(ticmd)];	/* the last command */
-static int rep_len;
+static char rep_cmd[sizeof(ticmd)];	///< keys of the last change, replayed by .
+static int rep_len;	///< length of rep_cmd
+/* save the keys of the current command (ticmd) for . */
 #define rep_record() memcpy(rep_cmd, ticmd, ticmd_pos); rep_len = ticmd_pos;
 
+/** @brief Show file info (type 0) or info on the character under the cursor (type 1). */
 static void vc_status(int type)
 {
 	int l, col;
@@ -513,6 +574,14 @@ static void vc_status(int type)
 	vi_drawmsg_mpt(vi_msg)
 }
 
+/**
+ * @brief Read a motion key and move (*row, *off).
+ * @param cmd  the operator key (e.g. 'd'), or -1 for plain cursor movement;
+ *             repeating the operator (dd) selects whole lines
+ * @param[in,out] row,off  position, moved by the motion
+ * @return the motion key, 0 if the key is not a motion, -1 if it failed;
+ *         *off = -1 on return means a linewise motion
+ */
 static int vi_region(int cmd, int *row, int *off)
 {
 	static sbuf *savepath[5];
@@ -797,6 +866,7 @@ static int vi_region(int cmd, int *row, int *off)
 	return mv;
 }
 
+/** @brief Yank the region into vi_ybuf (or default_reg). */
 static void vi_yank(int r1, int o1, int r2, int o2, int lnmode)
 {
 	sbuf rsb;
@@ -807,6 +877,7 @@ static void vi_yank(int r1, int o1, int r2, int o2, int lnmode)
 	cursor_off = lnmode ? cursor_off : o1;
 }
 
+/** @brief Yank and delete the region; lnmode deletes rows r1..r2. */
 static void vi_delete(int r1, int o1, int r2, int o2, int lnmode)
 {
 	sbuf rsb;
@@ -826,6 +897,7 @@ static void vi_delete(int r1, int o1, int r2, int o2, int lnmode)
 	cursor_off = lnmode ? lbuf_indents(xb, cursor_row) : o1;
 }
 
+/** @brief Byte length of the leading blanks of ln (0 if autoindent is off). */
 static int vi_indents(char *ln)
 {
 	if (opt_autoindent <= 0 || !ln)
@@ -835,6 +907,7 @@ static int vi_indents(char *ln)
 	return ln - pln;
 }
 
+/** @brief Replace the region with typed text; returns the key that ended input. */
 static int vi_change(int r1, int o1, int r2, int o2, int lnmode)
 {
 	char *post, *ln = lbuf_get(xb, r1);
@@ -863,12 +936,14 @@ static int vi_change(int r1, int o1, int r2, int o2, int lnmode)
 		view_top_row = r1;
 	sbuf_mem(sb, ln, l1)
 	key = led_input(sb, post, postn, r1 - (r1 - r2), 0, &postn);
+	/* edit only if the resulting line differs from the original */
 	if (postn + l2 != tlen || memcmp(ln + l1, sb->s + l1, tlen - l2 - l1))
 		lbuf_edit(xb, sb->s, r1, r2 + 1, o1, cursor_off);
 	free(sb->s);
 	return key;
 }
 
+/** @brief Change ASCII case in the region: u lower, U upper, ~ toggle. */
 static void vi_case(int r1, int o1, int r2, int o2, int lnmode, int cmd)
 {
 	sbuf rsb;
@@ -899,6 +974,7 @@ static void vi_case(int r1, int o1, int r2, int o2, int lnmode, int cmd)
 	cursor_off = lnmode ? lbuf_indents(xb, r2) : o2;
 }
 
+/** @brief Prompt with ":r1,r2!" to filter the rows through a command. */
 static void vi_pipe(int r1, int r2)
 {
 	int mlen, ret;
@@ -922,6 +998,7 @@ static void vi_pipe(int r1, int r2)
 	free(cmd);
 }
 
+/** @brief Indent (dir > 0, adds tabs) or unindent (removes up to count blanks) rows r1..r2. */
 static void vi_shift(int r1, int r2, int dir, int count)
 {
 	sbuf_smake(sb, 1024)
@@ -946,6 +1023,7 @@ static void vi_shift(int r1, int r2, int dir, int count)
 	free(sb->s);
 }
 
+/** @brief Operator command (d c y ! > < ~ u U ^w) followed by a motion. */
 static int vc_motion(int cmd)
 {
 	int r1 = cursor_row, r2 = cursor_row;	/* region rows */
@@ -971,6 +1049,7 @@ static int vc_motion(int cmd)
 		swap(&o1, &o2);
 	} else if (r1 == r2 && o1 > o2)
 		swap(&o1, &o2);
+	/* r briefly holds the line pointer; clamp o1 to the line's length */
 	ren_state *r = (ren_state*)lbuf_get(xb, r1);
 	r = r ? ren_position((char*)r) : NULL;
 	o1 = r ? MAX(0, MIN(o1, r->n)) : 0;
@@ -1000,6 +1079,7 @@ static int vc_motion(int cmd)
 	return 0;
 }
 
+/** @brief Insert commands i I a A o O; returns the key that ended input. */
 static int vc_insert(int cmd)
 {
 	char *post, *ln = lbuf_get(xb, cursor_row);
@@ -1028,6 +1108,7 @@ static int vc_insert(int cmd)
 		post = "\n";
 	} else {
 		off = cursor_off;
+		/* l1: byte offset of the cursor char; post: text after it, postn chars long */
 		l1 = rstate->chrs[off] - ln;
 		postn = rstate->n - off;
 		post = ln + l1;
@@ -1042,6 +1123,7 @@ static int vc_insert(int cmd)
 	return key;
 }
 
+/** @brief p / P: put a register after / before the cursor (linewise if it has a newline). */
 static int vc_put(int cmd)
 {
 	int cnt = MAX(1, vi_arg);
@@ -1069,6 +1151,7 @@ static int vc_put(int cmd)
 	if (!(ln = lbuf_get(xb, cursor_row)))
 		ln = "\n";
 	off = ren_noeol(ln, cursor_off) + (ln[0] != '\n' && cmd == 'p');
+	/* new line = bytes before char off + register x cnt + rest of the line */
 	sbuf_mem(sb, ln, rstate->chrs[off] - ln)
 	for (i = 0; i < cnt; i++)
 		sbuf_mem(sb, buf->s, buf->s_n)
@@ -1079,6 +1162,7 @@ static int vc_put(int cmd)
 	return 1;
 }
 
+/** @brief Join cnt lines from the cursor row; spc inserts spaces. */
 static void vc_join(int spc, int cnt)
 {
 	int o2 = 0;
@@ -1087,18 +1171,21 @@ static void vc_join(int spc, int cnt)
 	cursor_off = o2;
 }
 
+/** @brief Scroll down cnt rows, keeping the cursor on screen. */
 static void vi_scrollforward(int cnt)
 {
 	view_top_row = MIN(lbuf_len(xb) - 1, view_top_row + cnt);
 	cursor_row = MAX(cursor_row, view_top_row);
 }
 
+/** @brief Scroll up cnt rows, keeping the cursor on screen. */
 static void vi_scrollbackward(int cnt)
 {
 	view_top_row = MAX(0, view_top_row - cnt);
 	cursor_row = MIN(cursor_row, view_top_row + xrows - 1);
 }
 
+/** @brief r: replace the next count characters with the typed character. */
 static int vc_replace(void)
 {
 	int cnt = MAX(1, vi_arg);
@@ -1123,6 +1210,7 @@ static int vc_replace(void)
 	return cs[0] == '\n' ? 1 : 2;
 }
 
+/** @brief \@x / &x: run register x as keys (: register as ex commands); repeated key reuses the last one. */
 static void vc_execute(int cmd)
 {
 	static int exec_buf = -1;
@@ -1148,6 +1236,7 @@ static void vc_execute(int cmd)
 		term_exec(buf->s, buf->s_n, cmd)
 }
 
+/** @brief Push "<arg><cmd>" as pending input. */
 static void vi_argcmd(int arg, char cmd)
 {
 	char str[32];
@@ -1156,6 +1245,7 @@ static void vi_argcmd(int arg, char cmd)
 	term_push(str, cs - str + 1);
 }
 
+/* clamp cursor_row to the buffer and scroll so it is visible */
 #define topfix() \
 if (cursor_row < 0 || cursor_row >= lbuf_len(xb)) \
 	cursor_row = lbuf_len(xb) ? lbuf_len(xb) - 1 : 0; \
@@ -1164,6 +1254,10 @@ if (cursor_row < view_top_row) \
 else if (cursor_row >= view_top_row + xrows) \
 	view_top_row = cursor_row - xrows + 1; \
 
+/**
+ * @brief Vi main loop: read and execute normal-mode commands until quit_state.
+ * @param init  draw the screen before the first command
+ */
 void vi(int init)
 {
 	char *ln, *cs;
@@ -1743,6 +1837,7 @@ void vi(int init)
 		topfix()
 		ln = lbuf_get(xb, cursor_row);
 		cursor_off = ren_noeol(ln, cursor_off);
+		/* cursor on a zero-width char: move to the nearest visible one, in the direction of travel */
 		if (ln && !rstate->wid[cursor_off]) {
 			for (n = cursor_off, k = n; k < rstate->n && !rstate->wid[k];) {
 				if (!k)
@@ -1845,11 +1940,13 @@ void vi(int init)
 	}
 }
 
+/** @brief SIGWINCH handler: count resizes in term_winch. */
 static void sighandler(int signo)
 {
 	term_winch++;
 }
 
+/** @brief Install the SIGWINCH handler. */
 static void setup_signals(void)
 {
 	struct sigaction sa;
@@ -1858,6 +1955,7 @@ static void setup_signals(void)
 	sigaction(SIGWINCH, &sa, NULL);
 }
 
+/** @brief Parse -aemsv options, open files, and run vi() or ex(). */
 int main(int argc, char *argv[])
 {
 	int i, j;
