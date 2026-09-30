@@ -279,6 +279,7 @@ int ren_pos(char *s, int off);
 int ren_cursor(char *s, int pos);
 int ren_noeol(char *s, int p);
 int ren_off(char *s, int p);
+int ren_wrapw(int lncol);
 char *ren_translate(char *s, char *ln);
 /* text direction */
 int dir_context(char *s);
@@ -479,6 +480,7 @@ void led_render(char *s0, int cbeg, int cend);
 #define led_prender(msg, row, col, beg, end) _led_render(msg, row, col, beg, end,)
 #define led_crender(msg, row, col, beg, end) _led_render(msg, row, col, beg, end, term_kill();)
 char *led_read(int *kmap, int c);
+extern int led_row;
 int led_pos(char *s, int pos);
 void led_done(void);
 
@@ -487,7 +489,7 @@ struct buf {
 	char *ft;			/* file type */
 	char *path;			/* file path */
 	struct lbuf *lb;
-	int plen, row, off, top;
+	int plen, row, off, top, topsub;
 	long mtime;			/* modification time */
 	signed char td;			/* text direction */
 	int et;				/* expandtab - use spaces for indentation */
@@ -519,13 +521,15 @@ extern int xtc;
 extern int xmpt;
 extern int xpr;
 extern int xlim;
+extern int xlw;
+extern int xhllw;
 extern int xseq;
 extern int xerr;
 extern int xfr;
 extern int xrr;
 /* global variables */
 extern int xquit;
-extern int xrow, xoff, xtop;
+extern int xrow, xoff, xtop, xtopsub;
 extern int xbufcur;
 extern int xgrec;
 extern int xkmap;
@@ -553,6 +557,7 @@ extern struct buf *ex_pbuf;
 	xrow = buf->row; \
 	xoff = buf->off; \
 	xtop = buf->top; \
+	xtopsub = buf->topsub; \
 	xtd = buf->td; \
 	xet = buf->et; \
 	xsw = buf->sw; \
@@ -562,6 +567,7 @@ extern struct buf *ex_pbuf;
 	buf->row = xrow; \
 	buf->off = xoff; \
 	buf->top = xtop; \
+	buf->topsub = xtopsub; \
 	buf->td = xtd; \
 	buf->et = xet; \
 	buf->sw = xsw; \
@@ -648,6 +654,10 @@ void vi(int init);
 void vi_rendwait(void);
 extern int vi_hidch;
 extern int vi_lncol;
+/* soft line wrap geometry */
+int vi_lnrows(char *s);
+int vi_srow(int row);
+int vi_drawline(int row, int trow);
 /* filesystem */
 extern rstr *fsincl;
 void dir_calc(char *path);

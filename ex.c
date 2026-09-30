@@ -22,6 +22,8 @@ int xtc = 1;			/* tab path completion, 1: inline, 2: full screen */
 int xmpt;			/* whether to prompt after printing > 1 lines in vi */
 int xpr;			/* ex_cprint register */
 int xlim = -1;			/* rendering cutoff for non cursor lines */
+int xlw;			/* soft line wrap column, 0 = off, capped by the screen */
+int xhllw = 1;			/* highlight soft linewrap block start/end */
 int xseq = 1;			/* undo/redo sequence */
 int xerr = 1;			/* error handling -
 				bit 1: print errors, bit 2: early return, bit 3: ignore errors */
@@ -30,6 +32,7 @@ int xrr;			/* record register */
 
 int xquit;			/* exit if positive, force quit or unwind if negative */
 int xrow, xoff, xtop;		/* current row, column, and top row */
+int xtopsub;			/* the first visible segment of xtop */
 int xbufcur;			/* number of active buffers */
 int xgrec;			/* global vi/ex recursion depth */
 int xkmap;			/* the current keymap */
@@ -170,6 +173,7 @@ static int bufs_open(const char *path, int len)
 	bufs[i].row = 0;
 	bufs[i].off = 0;
 	bufs[i].top = 0;
+	bufs[i].topsub = 0;
 	bufs[i].td = +1;
 	bufs[i].et = 0;
 	bufs[i].sw = 8;
@@ -186,6 +190,7 @@ void temp_open(int i, char *name, char *ft)
 	tempbufs[i].row = 0;
 	tempbufs[i].off = 0;
 	tempbufs[i].top = 0;
+	tempbufs[i].topsub = 0;
 	tempbufs[i].td = +1;
 	tempbufs[i].et = 0;
 	tempbufs[i].sw = 8;
@@ -201,6 +206,7 @@ void temp_pos(int i, int row, int off, int top)
 	tempbufs[i].row = row < 0 ? 0 : row;
 	tempbufs[i].off = off;
 	tempbufs[i].top = top;
+	tempbufs[i].topsub = 0;
 }
 
 void temp_switch(int i, int swap)
@@ -1764,7 +1770,7 @@ static void *eo_##opt(char *loc, char *cmd, char *arg) { inner }
 	_EO(opt, x##opt = *arg ? eo_val(arg) : !x##opt; return NULL;)
 
 EO(pac) EO(pr) EO(ai) EO(err) EO(fr) EO(ish) EO(ic) EO(mpt)
-EO(rr) EO(shape) EO(seq) EO(order) EO(hll) EO(hlw)
+EO(rr) EO(shape) EO(seq) EO(order) EO(hllw) EO(hll) EO(hlw)
 EO(hlp) EO(hl) EO(lim) EO(led) EO(vis) EO(tc)
 EO(et) EO(idt)
 
@@ -1772,6 +1778,16 @@ _EO(ts, xts = *arg ? eo_val(arg) : !xts; xts = MAX(0, xts); RST_NULL(0, 1, 2) re
 _EO(sw, if (*arg) xsw = eo_val(arg); return NULL;)
 _EO(td, xtd = *arg ? eo_val(arg) : !xtd; RST_NULL(0, 1) return NULL;)
 _EO(grp, xgrp = (*arg ? eo_val(arg) : !xgrp) * 2; xgrp = MAX(0, xgrp); return NULL;)
+
+/* no argument turns the wrap on at INT_MAX, which ren_wrapw caps by the
+ * screen: the column then follows every resize on its own */
+_EO(lw,
+	xlw = !*arg ? (xlw ? 0 : INT_MAX) : eo_val(arg);
+	xleft = 0;
+	xtopsub = 0;
+	RST_NULL(0, 1)
+	return NULL;
+)
 
 _EO(hlr,
 	xhlr = *arg ? eo_val(arg) : !xhlr;
@@ -1914,6 +1930,7 @@ static struct excmd {
 	EO(td),
 	EO(tc),
 	EO(order),
+	EO(hllw),
 	EO(hll),
 	EO(hlw),
 	EO(hlp),
@@ -1922,6 +1939,7 @@ static struct excmd {
 	EO(left),
 	EO(lim),
 	EO(led),
+	EO(lw),
 	{"lsp", ec_lsp},
 	EO(vis),
 	{"", ec_print}, /* do not remove */

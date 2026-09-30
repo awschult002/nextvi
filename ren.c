@@ -85,6 +85,13 @@ static int ren_cwid(char *s, int pos)
 	return uc_wid(c);
 }
 
+/* the number of columns a wrapped segment holds */
+int ren_wrapw(int lncol)
+{
+	int w = MIN(xlw, xcols) - lncol;
+	return w > 0 ? w : 1;
+}
+
 /* 0 = editor's current line cache, 1 = drawing, 2 = aux
 (the paint thread only ever uses 1 and 2) */
 ren_state rstates[3];
@@ -103,7 +110,7 @@ ren_state *ren_position(char *s)
 	rstate->ctx = dir_context(s);
 	unsigned int n, max, l;
 	char *ss = s;
-	if (xlim >= 0 && rstate == rstates+1) {
+	if (xlim >= 0 && !xlw && rstate == rstates+1) {
 		max = (unsigned int)xlim;
 		for (n = 0; n < max && (l = uc_len(ss)); n++)
 			ss += l;

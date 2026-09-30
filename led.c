@@ -337,6 +337,11 @@ static int led_lastchar(char *s)
 	return r - s;
 }
 
+int led_row = -1;		/* terminal row of the edited line, -1 = relative */
+static int led_lw;		/* the edited line is drawn wrapped at absolute rows */
+static int led_rowh = 1;	/* the rows the edited line occupies */
+static int led_nextb;		/* the buffer line drawn below the edited line */
+
 static int led_lastword(char *s)
 {
 	char *r = *s ? uc_beg(s, strchr(s, '\0') - 1) : s;
@@ -462,9 +467,41 @@ static void led_printparts(sbuf *sb, int pre, int ps,
 			pos = ren_cursor(r->s, r->pos[off-two]);
 		pos += dir < 0 ? -1 : 1;
 	}
+	syn_scdir(0);
+	if (led_lw) {
+		int w = ren_wrapw(lncol), k, trow, b;
+		xleft = 0;
+		led_rowh = MAX(MAX(0, r->cmax), pos) / w + 1;
+		k = led_row + pos / w - xrows + 1;
+		if (k > 0) {			/* scroll to keep the cursor visible */
+			term_pos(0, 0);
+			term_room(-k);
+			led_row -= k;
+		} else if (led_row + pos / w < 0) {
+			k = -(led_row + pos / w);
+			term_pos(0, 0);
+			term_room(k);
+			led_row += k;
+		}
+		for (k = MAX(0, -led_row); k < led_rowh && led_row + k < xrows; k++) {
+			if (k && lncol) {
+				term_pos(led_row + k, 0);
+				term_kill();
+			}
+			led_crender(r->s, led_row + k, lncol, k * w, k * w + w);
+		}
+		/* the rows below shift with the edited line */
+		preserve(ren_state*, rstate, rstate = rstates;)
+		for (b = led_nextb, trow = led_row + led_rowh; trow < xrows; b++)
+			trow += vi_drawline(b, trow);
+		restore(rstate)
+		term_pos(led_row + pos / w, lncol + pos % w);
+		sbufn_cut(sb, psn)
+		rstate -= 2;
+		return;
+	}
 	if (pos >= xleft + xcols || pos < xleft)
 		xleft = pos < xcols ? 0 : pos - xcols / 2;
-	syn_scdir(0);
 	led_crender(r->s, -1, lncol, xleft, xleft + xcols - lncol);
 	term_pos(-1, led_pos(r->s, pos) + lncol);
 	sbufn_cut(sb, psn)
@@ -530,6 +567,15 @@ char *led_read(int *kmap, int c)
 	led_printparts(sb, pre, ps, *post, postn, poff); \
 	goto noredraw; \
 } \
+
+/* redraw the buffer rows above the edited line */
+static void led_redrawlw(int ctop, int crow)
+{
+	preserve(ren_state*, rstate, rstate = rstates;)
+	for (int i = ctop, trow = vi_srow(ctop); trow < xrows && i < crow; i++)
+		trow += vi_drawline(i, trow);
+	restore(rstate)
+}
 
 #define led_info(buf) _led_info(buf, postn)
 /* like led_info(), except the cursor is left where it was, in front of buf */
@@ -690,7 +736,11 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			goto redo_suggest;
 		case TK_CTL('z'):
 			term_suspend();
-			if (ai_max >= 0)
+			if (ai_max < 0)
+				continue;
+			if (led_lw)
+				led_redrawlw(ctop, crow);
+			else
 				led_redraw(sb->s, 0, orow, crow, ctop, flg);
 			continue;
 		case TK_CTL('x'):
@@ -728,6 +778,8 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 		case TK_CTL('b'):
 			if (ai_max >= 0) {
 				pac:;
+				if (led_lw)	/* the block has no wrapped form */
+					continue;
 				sbuf_nul(sb)
 				int r = crow-ctop+1;
 				if (is->sug)
@@ -793,7 +845,9 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			i = term_winch;
 			term_done();
 			term_init();
-			if (ai_max >= 0)
+			if (ai_max >= 0 && led_lw)
+				led_redrawlw(ctop, crow);
+			else if (ai_max >= 0)
 				led_redraw(sb->s, 0, orow, crow, ctop, flg);
 			else if (!i)
 				term_clean();
@@ -880,8 +934,12 @@ int led_prompt(sbuf *sb, char *insert, int *kmap, ins_state *is, int ps, int flg
 	}
 	preserve(int, xleft, xleft = 0;)
 	preserve(int, xtd, xtd = 2;)
+	preserve(int, led_row, led_row = -1;)
+	preserve(int, led_lw, led_lw = 0;)
 	key = led_line(sb, n, ps, &post, 0, &postref, -1,
 			&off, kmap, is, 0, xrow, xtop, flg);
+	restore(led_lw)
+	restore(led_row)
 	restore(xtd)
 	restore(xleft)
 	if (key == '\n' && flg & 1) {
@@ -898,6 +956,8 @@ int led_input(sbuf *sb, char *post, int postn, int row, int flg, int *pren)
 	int n, key, ps = 0, crow = xrow, ctop = xtop;
 	char *postref = NULL;
 	ins_state is;
+	led_nextb = row + 1 - !!(flg & 4);
+	led_lw = xlw && led_row >= 0;
 	while (1) {
 		ins_init(is)
 		key = led_line(sb, sb->s_n, ps, &post, postn, &postref,
@@ -911,12 +971,24 @@ int led_input(sbuf *sb, char *post, int postn, int row, int flg, int *pren)
 				sb->s[*pren] = *post;
 			free(postref);
 			xrow = crow;
+			led_row = -1;
+			led_lw = 0;
 			return key;
 		}
 		sbuf_chr(sb, key)
 		led_printparts(sb, -1, ps, "", 0, &xoff);
-		term_chr('\n');
-		term_room(1);
+		if (led_lw) {
+			led_row += led_rowh;
+			if (led_row >= xrows) {	/* scroll the finished lines up */
+				n = led_row - xrows + 1;
+				term_pos(0, 0);
+				term_room(-n);
+				led_row -= n;
+			}
+		} else {
+			term_chr('\n');
+			term_room(1);
+		}
 		crow++;
 		n = ps;
 		ps = sb->s_n;
