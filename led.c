@@ -190,6 +190,7 @@ void led_extcut(void)
 		return;
 	memmove(extsb->s, &extsb->s[extsb->s_n] - extregn, extregn);
 	sbuf_cut(extsb, extregn)
+	ts_init();
 }
 
 #define print_ch1(out) sbuf_mem(out, chrs[o], l)
@@ -337,6 +338,9 @@ static int led_lastchar(char *s)
 	return r - s;
 }
 
+static int led_preview_ps;
+static void led_preview_draw(int ps);
+
 int led_row = -1;		/* terminal row of the edited line, -1 = relative */
 static int led_lw;		/* the edited line is drawn wrapped at absolute rows */
 static int led_rowh = 1;	/* the rows the edited line occupies */
@@ -452,6 +456,11 @@ static void led_printparts(sbuf *sb, int pre, int ps,
 	int lncol = poff == &xoff ? vi_lncol : 0;
 	sbuf_str(sb, post)
 	sbuf_nul4(sb)
+	if (ts_preview && poff == &xoff) {
+		led_preview_ps = ps;
+		if (ts_preview_update(ts_preview, sb->s) && !led_lw)
+			led_preview_draw(ps);
+	}
 	/* XXX: O(n) insertion; recursive array data structure cannot be optimized.
 	For correctness, rstate must be recomputed. */
 	rstate += 2;
@@ -483,16 +492,22 @@ static void led_printparts(sbuf *sb, int pre, int ps,
 			term_room(k);
 			led_row += k;
 		}
+		if (ts_preview)
+			led_preview_draw(ps);
 		for (k = MAX(0, -led_row); k < led_rowh && led_row + k < xrows; k++) {
 			if (k && lncol) {
 				term_pos(led_row + k, 0);
 				term_kill();
 			}
-			led_crender(r->s, led_row + k, lncol, k * w, k * w + w);
+			if (ts_preview)
+				led_srender(r->s, led_row + k, lncol, k * w, k * w + w,
+					ts_preview, ts_preview_row(ps), 0)
+			else
+				led_crender(r->s, led_row + k, lncol, k * w, k * w + w);
 		}
 		/* the rows below shift with the edited line */
 		preserve(ren_state*, rstate, rstate = rstates;)
-		for (b = led_nextb, trow = led_row + led_rowh; trow < xrows; b++)
+		for (b = led_nextb, trow = led_row + led_rowh; !ts_preview && trow < xrows; b++)
 			trow += vi_drawline(b, trow);
 		restore(rstate)
 		term_pos(led_row + pos / w, lncol + pos % w);
@@ -502,7 +517,10 @@ static void led_printparts(sbuf *sb, int pre, int ps,
 	}
 	if (pos >= xleft + xcols || pos < xleft)
 		xleft = pos < xcols ? 0 : pos - xcols / 2;
-	led_crender(r->s, -1, lncol, xleft, xleft + xcols - lncol);
+	if (ts_preview && poff == &xoff)
+		led_preview_current(r->s, ps, lncol);
+	else
+		led_crender(r->s, -1, lncol, xleft, xleft + xcols - lncol);
 	term_pos(-1, led_pos(r->s, pos) + lncol);
 	sbufn_cut(sb, psn)
 	rstate -= 2;
@@ -571,6 +589,10 @@ char *led_read(int *kmap, int c)
 /* redraw the buffer rows above the edited line */
 static void led_redrawlw(int ctop, int crow)
 {
+	if (ts_preview) {
+		led_preview_draw(led_preview_ps);
+		return;
+	}
 	preserve(ren_state*, rstate, rstate = rstates;)
 	for (int i = ctop, trow = vi_srow(ctop); trow < xrows && i < crow; i++)
 		trow += vi_drawline(i, trow);
@@ -583,6 +605,10 @@ static void led_redrawlw(int ctop, int crow)
 
 static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 {
+	if (ts_preview) {
+		led_preview_draw(led_preview_ps);
+		return;
+	}
 	rstate++;
 	for (int nl = 0; r < xrows; r++) {
 		if (vi_lncol) {
@@ -611,6 +637,7 @@ static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 
 void led_modeswap(void)
 {
+	preserve(struct ts_state*, ts_preview, ts_preview = NULL;)
 	preserve(int, xquit, xquit = 0;)
 	preserve(int, texec, texec = 0;)
 	preserve(int, xvis, xvis ^= 2;)
@@ -628,6 +655,7 @@ void led_modeswap(void)
 	restore(texec)
 	restore(xvis)
 	restore(xexec_dep)
+	restore(ts_preview)
 }
 
 /* read a line from the terminal */
@@ -812,6 +840,7 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			preserve(int, texec, texec = 0;)
 			preserve(int, xquit, xquit = 0;)
 			preserve(int, ftidx,)
+			preserve(struct ts_state*, ts_preview, ts_preview = NULL;)
 			temp_switch(0, 0);
 			vi(1);
 			exbuf_save(ex_buf)
@@ -825,6 +854,7 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			syn_setft(xb_ft);
 			vi(1); /* redraw past screen */
 			restore(ftidx)
+			restore(ts_preview)
 			term_pos(xrows, 0);
 			if (xquit > 0 || (xquit < -256 && xquit >= -512))
 				restore(xquit)
@@ -950,8 +980,11 @@ int led_prompt(sbuf *sb, char *insert, int *kmap, ins_state *is, int ps, int flg
 	return key;
 }
 
-int led_input(sbuf *sb, char *post, int postn, int row, int flg, int *pren)
+int led_input(sbuf *sb, char *post, int postn, int row, int flg, int *pren,
+	int source_beg, int source_end)
 {
+	preserve(struct ts_state*, ts_preview,
+		ts_preview = ts_preview_begin(xb, source_beg, source_end);)
 	int ai_max = 128 * xai;
 	int n, key, ps = 0, crow = xrow, ctop = xtop;
 	char *postref = NULL;
@@ -971,6 +1004,8 @@ int led_input(sbuf *sb, char *post, int postn, int row, int flg, int *pren)
 				sb->s[*pren] = *post;
 			free(postref);
 			xrow = crow;
+			ts_free(ts_preview);
+			restore(ts_preview)
 			led_row = -1;
 			led_lw = 0;
 			return key;

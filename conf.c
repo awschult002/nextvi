@@ -389,3 +389,41 @@ char *conf_digraph(int c1, int c2)
 			return digraphs[i][1];
 	return NULL;
 }
+
+/* Tree-sitter grammar and predicate-free query configuration. */
+#include <tree_sitter/api.h>
+extern const TSLanguage *tree_sitter_c(void);
+static const struct {
+	char *ft;
+	const TSLanguage *(*language)(void);
+	const char *query;
+} ts_languages[] = {
+	{FT(c), tree_sitter_c,
+	"(primitive_type) @type (type_identifier) @type "
+	"(sized_type_specifier) @type "
+	"[\"const\" \"volatile\" \"restrict\" \"static\" \"extern\" \"inline\" "
+	"\"typedef\" \"struct\" \"union\" \"enum\" \"register\" \"auto\"] @type "
+	"[\"if\" \"else\" \"switch\" \"case\" \"default\" \"for\" \"while\" "
+	"\"do\" \"break\" \"continue\" \"return\" \"goto\" \"sizeof\"] @keyword "
+	"[\"+\" \"-\" \"*\" \"/\" \"%\" \"=\" \"==\" \"!=\" \"<\" \">\" "
+	"\"<=\" \">=\" \"&&\" \"||\" \"!\" \"~\" \"&\" \"|\" \"^\" "
+	"\"<<\" \">>\" \"++\" \"--\" \"+=\" \"-=\" \"*=\" \"/=\" "
+	"\"%=\" \"&=\" \"|=\" \"^=\" \"<<=\" \">>=\" \"?\" \":\" \"->\"] @operator "
+	"(call_expression function: (identifier) @function) "
+	"(function_declarator declarator: (identifier) @function) "
+	"(preproc_directive) @preprocessor "
+	"[\"#include\" \"#define\" \"#if\" \"#ifdef\" \"#ifndef\" \"#else\" "
+	"\"#elif\" \"#endif\"] @preprocessor "
+	"(number_literal) @number "
+	"[(string_literal) (system_lib_string)] @string (char_literal) @character "
+	"(escape_sequence) @escape (comment) @comment"},
+};
+static const struct {
+	const char *name;
+	int att;
+} ts_attributes[] = {
+	{"type", GR1}, {"keyword", YE1}, {"operator", RE},
+	{"function", SYN_BD}, {"preprocessor", CY}, {"number", RE1},
+	{"string", MA}, {"character", MA}, {"escape", CY1},
+	{"comment", BL | SYN_IT},
+};

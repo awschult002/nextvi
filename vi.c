@@ -26,6 +26,7 @@
 #include "ren.c"
 #include "term.c"
 #include "uc.c"
+#include "treesitter.c"
 #include "lsp.c"
 
 /* the frame the redraw thread paints while the input loop reads keys */
@@ -465,11 +466,12 @@ static void vi_lnwidset(void)
 static int vi_rowbeg, vi_rowend;
 
 /* render a line at terminal row trow; return the rows it occupies */
-static int vi_rendrow(char *s, int trow, int lncol)
+static int vi_rendrow(char *s, int trow, int lncol, int source_row)
 {
 	int h, w, k, i, beg, lim;
 	if (!xlw) {
-		led_crender(s, trow, lncol, xleft, xleft + xcols - lncol)
+		led_srender(s, trow, lncol, xleft, xleft + xcols - lncol,
+			ts_document(xb), source_row, 0)
 		return 1;
 	}
 	w = ren_wrapw(lncol);
@@ -483,7 +485,8 @@ static int vi_rendrow(char *s, int trow, int lncol)
 			term_pos(trow + k, 0);
 			term_kill();
 		}
-		led_crender(s, trow + k, lncol, k * w, k * w + w)
+		led_srender(s, trow + k, lncol, k * w, k * w + w,
+			ts_document(xb), source_row, 0)
 	}
 	return h;
 }
@@ -576,7 +579,7 @@ static int vi_drawrow(int row, int trow)
 		memset(c, ' ', l1 - (c - tmp));
 		c[l1 - (c - tmp)] = '\0';
 		vi_visual_attrib(s, row);
-		i = vi_rendrow(s, trow, l1);
+		i = vi_rendrow(s, trow, l1, row - vi_rshift);
 		int dcol = l1 + rstate->cmax - xleft;
 		preserve(int, syn_blockhl, syn_blockhl = -1;)
 		preserve(int, ftidx,)
@@ -602,7 +605,7 @@ static int vi_drawrow(int row, int trow)
 		goto done;
 	}
 	vi_visual_attrib(s, row);
-	i = vi_rendrow(s, trow, 0);
+	i = vi_rendrow(s, trow, 0, row - vi_rshift);
 	int dcol = rstate->cmax - xleft;
 	rstate = rstates;
 	if (diag && trow >= 0)
@@ -1460,7 +1463,7 @@ static int vi_change(int r1, int o1, int r2, int o2, int lnmode)
 	}
 	led_row = xlw ? MAX(0, vi_srow(r1)) : -1;
 	sbuf_mem(sb, ln, l1)
-	key = led_input(sb, post, postn, r1 - (r1 - r2), 0, &postn);
+	key = led_input(sb, post, postn, r1 - (r1 - r2), 0, &postn, r1, r2 + 1);
 	if (postn + l2 != tlen || memcmp(ln + l1, sb->s + l1, tlen - l2 - l1))
 		lbuf_edit(xb, sb->s, r1, r2 + 1, o1, xoff);
 	free(sb->s);
@@ -1831,7 +1834,7 @@ static int vc_insert(int cmd)
 		term_room(cmdo);
 	}
 	sbuf_mem(sb, ln, l1)
-	key = led_input(sb, post, postn, row, cmdo << 2, &postn);
+	key = led_input(sb, post, postn, row, cmdo << 2, &postn, row, MIN(row + !cmdo, lbuf_len(xb)));
 	if (postn != l1 || cmdo || !ln)
 		lbuf_edit(xb, sb->s, row, row + !cmdo, off, xoff);
 	free(sb->s);
@@ -2697,9 +2700,15 @@ void vi(int init)
 		xpln = 0;
 		if (xhlw) {
 			static char *word;
+			static int tree;
+			int use_tree = ts_document(xb) != NULL;
 			if ((cs = vi_curword(xb, xrow, xoff, xhlw, 0))) {
-				if (!word || strcmp(word, cs)) {
-					syn_reloadft(syn_addhl(cs, 1), 0);
+				if (!word || strcmp(word, cs) || tree != use_tree) {
+					if (use_tree)
+						ts_setword(cs);
+					else
+						syn_reloadft(syn_addhl(cs, 1), 0);
+					tree = use_tree;
 					vi_mod |= 1;
 				}
 				free(word);
@@ -2778,6 +2787,10 @@ static void *vi_rendloop(void *arg)
 		n = r->pos;
 		pthread_mutex_unlock(&r->mtx);
 		term_record = 1;	/* one frame, one write */
+		if (ts_redraw) {
+			vi_mod |= 1;
+			ts_redraw = 0;
+		}
 		if (vi_mod & 1 || xleft != oleft
 				|| (vi_lnnum && orow != xrow && !(vi_lnnum == 2))
 				|| (*vi_word && orow != xrow))
@@ -2793,9 +2806,11 @@ static void *vi_rendloop(void *arg)
 				if (!(vi_mod & 1))
 					vi_drawrow(orow, vi_srow(orow));
 			syn_blockhl = -1;
-			syn_reloadft(syn_addhl("^.+", 2), 0);
+			if (!ts_document(xb))
+				syn_reloadft(syn_addhl("^.+", 2), 0);
 			vi_drawrow(xrow, vi_srow(xrow));
-			syn_reloadft(syn_addhl(NULL, 2), 0);
+			if (!ts_document(xb))
+				syn_reloadft(syn_addhl(NULL, 2), 0);
 		} else if (vi_mod & 2 && !(vi_mod & 1)) {
 			syn_blockhl = -1;
 			vi_drawrow(xrow, vi_srow(xrow));
@@ -2892,6 +2907,7 @@ int main(int argc, char *argv[])
 	setup_signals();
 	dir_init();
 	syn_init();
+	ts_init();
 	temp_open(0, "/hist/", _ft);
 	temp_open(1, "/fm/", fm_ft);
 	temp_open(2, "/sc/", _ft);
@@ -2928,6 +2944,7 @@ int main(int argc, char *argv[])
 		ex();
 	else
 		vi(1);
+	ts_done();
 	term_done();
 	if (xvis & 8)
 		term_scrl()

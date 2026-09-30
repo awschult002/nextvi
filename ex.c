@@ -2,7 +2,7 @@ int xleft;			/* the first visible column */
 int xvis;			/* startup flags */
 int xai = 1;			/* autoindent option */
 int xic = 1;			/* ignorecase option */
-int xhl = 1;			/* syntax highlight option */
+int xhl = 2;			/* syntax highlight option */
 int xhll;			/* highlight current line */
 int xhlw;			/* highlight current word */
 int xhlp;			/* highlight {}[]() pair */

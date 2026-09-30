@@ -273,6 +273,11 @@ static int syn_initft(int fti, int n, char *name, int flg)
 	return i < hlslen && hls[i].ft == name && hls[i].set != set;
 }
 
+char *syn_getft(void)
+{
+	return ftmap[ftidx].ft;
+}
+
 char *syn_setft(char *ft)
 {
 	int i;
@@ -355,6 +360,8 @@ void syn_highlight(int *att, char *s, int n)
 				goto skip;
 			int beg = uc_off(s, sidx + subs[ii]);
 			int end = beg + uc_off(s + sidx + subs[ii], subs[ii + 1] - subs[ii]);
+			beg = MIN(beg, n);
+			end = MIN(end, n);
 			if (SYN_SET(ATT, catt[i])) {
 				int pb = blockhl >= 0 && syn_blockhl >= 0;
 				iatt = &catt[i + 1];

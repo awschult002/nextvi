@@ -86,6 +86,7 @@ int lbuf_jump(struct lbuf *lb, int mk, int *pos, int *off)
 
 void lbuf_free(struct lbuf *lb)
 {
+	ts_forget(lb);
 	int i;
 	for (i = 0; i < lb->ln_n; i++)
 		lbuf_rfree(lb->ln[i]);
@@ -122,6 +123,7 @@ static int lbuf_replace(struct lbuf *lb, sbuf *sb, char *s, struct lopt *lo, int
 			s += l;
 		}
 	}
+	ts_edit(lb, pos, n_del, (char**)sb->s, n_ins);
 	if (lb->ln_n + n_ins - n_del >= lb->ln_sz) {
 		int nsz = lb->ln_n + n_ins - n_del + 512;
 		char **nln = emalloc(nsz * sizeof(lb->ln[0]));

@@ -58,10 +58,37 @@ case "$OS" in
 *) CFLAGS="$CFLAGS -D_DEFAULT_SOURCE" ;;
 esac
 
+# Fetch once; compile the runtime and generated C parser into vi.
+ts_fetch() (
+    ts_dest=".treesitter/$1-$3"
+    [ -d "$ts_dest" ] && exit 0
+    require git
+    mkdir -p .treesitter || exit 1
+    ts_tmp="$ts_dest.tmp.$$"
+    trap 'rm -rf "$ts_tmp"' EXIT
+    trap 'exit 1' HUP INT TERM
+    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$2" "https://github.com/tree-sitter/$1" "$ts_tmp" || exit 1
+    [ "$(git -C "$ts_tmp" rev-parse HEAD)" = "$3" ] || {
+        log "$R" "Unexpected revision for $1 $2"
+        exit 1
+    }
+    mv "$ts_tmp" "$ts_dest" || exit 1
+)
+
+ts_setup() {
+    ts_fetch tree-sitter v0.25.10 da6fe9beb4f7f67beb75914ca8e0d48ae48d6406 || exit 1
+    ts_fetch tree-sitter-c v0.24.1 7fa1be1b694b6e763686793d97da01f36a0e5c12 || exit 1
+    ts_runtime=.treesitter/tree-sitter-da6fe9beb4f7f67beb75914ca8e0d48ae48d6406/lib
+    ts_grammar=.treesitter/tree-sitter-c-7fa1be1b694b6e763686793d97da01f36a0e5c12/src
+    TS_SOURCES="$ts_runtime/src/lib.c $ts_grammar/parser.c"
+    TS_CFLAGS="-D_DEFAULT_SOURCE -I$ts_runtime/include -I$ts_runtime/src -I$ts_grammar"
+}
+
 build() {
     require "${CC}"
+    ts_setup
     log "$G" "Entering step: \"Build \"${BASE##*/}\" using \"$CC\"\""
-    run "$CC vi.c -o vi $CFLAGS" || {
+    run "$CC vi.c $TS_SOURCES $TS_CFLAGS -o vi $CFLAGS" || {
         log "$R" "Failed during step: \"Build \"${BASE##*/}\" using \"$CC\""
         exit 1
     }
@@ -122,14 +149,15 @@ while [ $# -gt 0 ] || [ "$1" = "" ]; do
                 fi
                 [ -z "$PROFDATA" ] && log "$R" "pgobuild with clang requires llvm-profdata" && exit 1
             fi
-            run "$CC vi.c -fprofile-generate=. -o vi -O2 $CFLAGS"
+            run "$CC vi.c $TS_SOURCES $TS_CFLAGS -fprofile-generate=. -o vi -O2 $CFLAGS" || return 1
             EXINIT="$(printf '%b' '&dw100.1\\\\:/not matching:&:b0:&100J0300liinsert:&ewbgw:q!')"
             export EXINIT && ./vi ./vi.c > /dev/null
             [ "$clang" = 1 ] && run "$PROFDATA" merge ./*.profraw -o default.profdata
-            run "$CC vi.c -fprofile-use=. -o vi -O2 $CFLAGS"
+            run "$CC vi.c $TS_SOURCES $TS_CFLAGS -fprofile-use=. -o vi -O2 $CFLAGS" || return 1
             rm -f ./*.gcda ./*.profraw ./default.profdata
         }
         require "${CC}"
+        ts_setup
         log "$G" "Entering step: \"Build \"${BASE##*/}\" using \"$CC\" and PGO\""
         pgobuild || {
             log "$R" "Failed during step: \"Build \"${BASE##*/}\" using \"$CC\" and PGO\""

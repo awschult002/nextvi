@@ -188,7 +188,10 @@ struct linfo {
 	int len;
 	int grec;
 };
+struct ts_state;
 struct lbuf {
+	struct ts_state *ts;
+	unsigned long ts_revision;
 	char **ln;			/* buffer lines */
 	struct lopt *hist;		/* buffer history */
 	int *mark;			/* mark id, row & off triplets */
@@ -318,6 +321,7 @@ void dir_init(void);
 extern int ftidx;
 extern int syn_scdirl;
 extern int syn_blockhl;
+char *syn_getft(void);
 char *syn_setft(char *ft);
 void syn_scdir(int scdir);
 void syn_highlight(int *att, char *s, int n);
@@ -464,8 +468,39 @@ is.sug = NULL; \
 is._sug = NULL; \
 
 int led_prompt(sbuf *sb, char *insert, int *kmap, ins_state *is, int ps, int flg);
-int led_input(sbuf *sb, char *post, int postn, int row, int flg, int *pren);
+int led_input(sbuf *sb, char *post, int postn, int row, int flg, int *pren,
+	int source_beg, int source_end);
 void led_render(char *s0, int cbeg, int cend);
+void led_render_source(char *s0, int cbeg, int cend, struct ts_state *source,
+	int row, int col);
+void ts_init(void);
+void ts_done(void);
+void ts_free(struct ts_state *s);
+void ts_forget(struct lbuf *lb);
+void ts_edit(struct lbuf *lb, int row, int del, char **lines, int ins);
+struct ts_state *ts_document(struct lbuf *lb);
+struct ts_state *ts_preview_begin(struct lbuf *lb, int beg, int end);
+int ts_preview_update(struct ts_state *s, char *text);
+char *ts_line(struct ts_state *s, int row);
+extern struct ts_state *ts_preview;
+extern int ts_redraw;
+static void led_preview_current(char *text, int ps, int lncol);
+static int ts_preview_row(int ps);
+#define ts_winy 0
+#define ts_winx 0
+#define ts_winh xrows
+#define ts_winw xcols
+#define led_srender(msg, sr, sc, beg, end, view, row, col) \
+{ \
+	int record = term_record; \
+	term_record = 1; \
+	term_pos(sr, sc); \
+	term_kill(); \
+	led_render_source(msg, beg, end, view, row, col); \
+	if (!record) \
+		term_commit(); \
+} \
+
 #define _led_render(msg, row, col, beg, end, kill) \
 { \
 	int record = term_record; \
