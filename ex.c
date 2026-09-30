@@ -1697,12 +1697,12 @@ static int eo_val(char *arg)
 #define _EO(opt, inner) \
 static void *eo_##opt(char *loc, char *cmd, char *arg) { inner }
 
-#define EO(opt) \
-	_EO(opt, x##opt = *arg ? eo_val(arg) : !x##opt; return NULL;)
+#define EO(opt, var) \
+	_EO(opt, var = *arg ? eo_val(arg) : !var; return NULL;)
 
-EO(pac) EO(pr) EO(ai) EO(err) EO(fr) EO(ish) EO(ic) EO(mpt)
-EO(rr) EO(shape) EO(seq) EO(order) EO(hll) EO(hlw)
-EO(hlp) EO(hl) EO(lim) EO(led) EO(vis)
+EO(pac, xpac) EO(pr, xpr) EO(ai, xai) EO(err, xerr) EO(fr, xfr) EO(ish, xish) EO(ic, xic) EO(mpt, xmpt)
+EO(rr, xrr) EO(shape, xshape) EO(seq, xseq) EO(order, xorder) EO(hll, xhll) EO(hlw, xhlw)
+EO(hlp, xhlp) EO(hl, xhl) EO(lim, xlim) EO(led, xled) EO(vis, xvis)
 
 _EO(ts, xts = *arg ? eo_val(arg) : !xts; xts = MAX(0, xts); RST_NULL(0, 1, 2) return NULL;)
 _EO(td, xtd = *arg ? eo_val(arg) : !xtd; RST_NULL(0, 1) return NULL;)
