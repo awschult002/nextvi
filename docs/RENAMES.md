@@ -2,6 +2,20 @@
 
 Old names from upstream `kyx0r/nextvi` (base `b1c78886`) and their new names. Generated from `scripts/renames-globals.tsv`; replay with `scripts/rename.sh` on a fresh upstream.
 
+### Replaying on a fresh upstream
+
+Run this on a clean upstream checkout, not on a branch that already has the renames. There, the script sees the new names and stops with a "collision".
+
+```sh
+git cherry-pick 4483990d   # EO(name, var) macro change: hand-written, required first
+sh scripts/rename.sh scripts/renames-globals.tsv
+sh scripts/rename.sh scripts/renames-term.tsv
+sh scripts/rename.sh scripts/renames-vi-lnum.tsv
+sh ./cbuild.sh
+```
+
+Without the cherry-pick the script still finishes, but the build fails (`xpac undeclared`), because `EO()` builds each option variable's name by pasting `x` onto the option name. The `LN_*` constants and the Doxygen comments aren't in the tables; they come over by merging or cherry-picking their commits.
+
 **Unity build:** `vi.c` `#include`s every other `.c` file, so all globals and file-level statics share one scope. Renames and collision checks therefore always run across the whole tree (`*.c`, `*.h`), and rename commits are built with `-Wshadow` to catch a local that would shadow a new name.
 
 ## Globals (`scripts/renames-globals.tsv`)
