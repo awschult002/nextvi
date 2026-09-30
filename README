@@ -98,6 +98,7 @@ VI NORMAL
      2#            Toggle show global line numbers permanently
      4#            Toggle show relative line numbers after indent permanently
      8#            Toggle show relative line numbers permanently
+                   (counts combine, e.g. 10#; see docs/USAGE.md)
      V             Toggle show hidden characters:<Space Tab Newline>
      <^C>          Toggle show line motion numbers for <l h e b E B w W>
      {<1-5>}<^C>   Select line motion number mode 1-5
