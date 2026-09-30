@@ -945,6 +945,38 @@ static void *ec_write(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+/* back to the buffer the write-all started in, temp or not */
+static void bufs_restore(struct buf *obuf, int oidx)
+{
+	if (obuf == ex_buf)
+		return;
+	if (istempbuf(obuf))
+		temp_switch(oidx, 0);
+	else
+		bufs_switch(oidx);
+}
+
+static void *ec_writeall(char *loc, char *cmd, char *arg)
+{
+	char *ret = NULL;
+	int force = strchr(cmd, '!') != NULL;
+	int onlymod = cmd[0] == 'x';
+	int noquit = cmd[0] == 'w' && cmd[1] == 'a';
+	struct buf *obuf = ex_buf;
+	int oidx = obuf - (istempbuf(obuf) ? tempbufs : bufs);
+	for (int i = 0; i < xbufcur; i++) {
+		bufs_switch(i);
+		if (onlymod && !xb->modified)
+			continue;
+		if ((ret = ec_write("", force ? "w!" : "w", ""))) {
+			bufs_restore(obuf, oidx);
+			return ret;
+		}
+	}
+	bufs_restore(obuf, oidx);
+	return noquit ? NULL : ec_quit("", force ? "q!" : "q", "");
+}
+
 static void *ec_termexec(char *loc, char *cmd, char *arg)
 {
 	if (*arg && term_sbuf)
@@ -2164,8 +2196,12 @@ static struct excmd excmds[] = {
 	{"rd", ec_undoredo},
 	EO(rr),
 	{"r", ec_read},
+	{"wqa!", ec_writeall},
+	{"wqa", ec_writeall},
 	{"wq!", ec_write},
 	{"wq", ec_write},
+	{"wa!", ec_writeall},
+	{"wa", ec_writeall},
 	{"w!", ec_write},
 	{"w", ec_write},
 	{"uc", ec_setenc},
@@ -2178,6 +2214,8 @@ static struct excmd excmds[] = {
 	{"sc", ec_specials},
 	EO(sw),
 	{"s", ec_substitute},
+	{"xa!", ec_writeall},
+	{"xa", ec_writeall},
 	{"x!", ec_write},
 	{"x", ec_write},
 	{"ya!", ec_yank},
