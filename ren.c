@@ -1,7 +1,13 @@
-static rset *dir_rslr;	/* pattern of marks for left-to-right strings */
-static rset *dir_rsrl;	/* pattern of marks for right-to-left strings */
-static rset *dir_rsctx;	/* direction context patterns */
+/**
+ * @file ren.c
+ * @brief Rendering: maps a line's characters to screen columns (tabs, wide
+ * chars, bidi reordering), and syntax highlighting by filetype.
+ */
+static rset *dir_rslr;	///< pattern of marks for left-to-right strings
+static rset *dir_rsrl;	///< pattern of marks for right-to-left strings
+static rset *dir_rsctx;	///< direction context patterns (dctxs[])
 
+/** @brief Reverse ord[beg, end). */
 static void dir_reverse(int *ord, int beg, int end)
 {
 	end--;
@@ -14,7 +20,13 @@ static void dir_reverse(int *ord, int beg, int end)
 	}
 }
 
-/* reorder the characters based on direction marks and characters */
+/**
+ * @brief Reorder the characters based on direction marks and characters.
+ * Fills ord[] (visual position -> char index), reversing each matched group
+ * whose dmarks[] dir is negative.
+ * @param end  number of chars; ord[] is set to identity on the first match
+ * @return nonzero if anything matched (ord[] is valid)
+ */
 static int dir_reorder(char *s, char *se, int *ord, int end, int dir)
 {
 	rset *rs = dir < 0 ? dir_rsrl : dir_rslr;
@@ -22,6 +34,7 @@ static int dir_reorder(char *s, char *se, int *ord, int end, int dir)
 	int subs[LEN(dmarks[0].dir) * 2], found, i;
 	int flg = se > s && se[-1] == '\n' ? REG_NEWLINE : 0;
 	while (se > s && (found = rset_find(rs, s, subs, flg)) >= 0) {
+		/* runs once: end becomes -1 after the first match */
 		for (i = 0; i < end; i++)
 			ord[i] = i;
 		end = -1;
@@ -41,7 +54,7 @@ static int dir_reorder(char *s, char *se, int *ord, int end, int dir)
 	return end < 0;
 }
 
-/* return the direction context of the given line */
+/** @brief Direction context of the given line: +1 LTR, -1 RTL. */
 int dir_context(char *s)
 {
 	int found;
@@ -55,6 +68,7 @@ int dir_context(char *s)
 	return opt_text_dir < 0 ? -1 : +1;
 }
 
+/** @brief Compile dmarks[] into the LTR/RTL mark sets and dctxs[] into dir_rsctx. */
 void dir_init(void)
 {
 	char *relr[128];
@@ -72,6 +86,7 @@ void dir_init(void)
 	dir_rsctx = rset_make(i, ctx, 0);
 }
 
+/** @brief Screen width of the char at s drawn at column pos (tabs reach the next stop). */
 static int ren_cwid(char *s, int pos)
 {
 	if (s[0] == '\t')
@@ -85,12 +100,18 @@ static int ren_cwid(char *s, int pos)
 	return uc_wid(c);
 }
 
-/* 0 = current line, 1 = all other lines,
-2 = aux rendering (never lbuf backed by construction) */
+/** Render caches: 0 = current line, 1 = all other lines,
+2 = aux rendering (never lbuf backed by construction). */
 ren_state rstates[3];
-ren_state *rstate = rstates;
+ren_state *rstate = rstates;	///< active cache, one of rstates[]
 
-/* specify the screen position of the characters in s */
+/**
+ * @brief Specify the screen position of the characters in s; the result is
+ * cached in *rstate, keyed by the pointer s.
+ * On rstates[1] with opt_render_limit >= 0 only that many chars are kept:
+ * the next char is overwritten with NULs (saved in nulhole) until
+ * led_render() restores it.
+ */
 ren_state *ren_position(char *s)
 {
 	if (rstate->s == s)
@@ -115,6 +136,8 @@ ren_state *ren_position(char *s)
 			ss += l;
 	unsigned int b = n + 1, c = 2, i;
 	int cpos = 0, wid, *col;
+	/* one block of b = n + 1 entries each: pos[] screen column, off[] (the
+	 * order while reordering, then widths: rstate->wid), chrs[] char pointers */
 	int *pos = emalloc((b * 2 * sizeof(pos[0])) + b * sizeof(char*));
 	int *off = &pos[b];
 	char **chrs = (char**)&off[b];
@@ -131,6 +154,7 @@ ren_state *ren_position(char *s)
 			cpos += wid;
 		}
 		pos[n] = cpos;
+		/* col[c]: char index at screen column c; 2 leading slots (col[-2], col[-1]) hold n */
 		col = emalloc((cpos + 2) * sizeof(col[0]));
 		for (i = 0; i < n; i++) {
 			wid = wids[off[i]];
@@ -168,21 +192,21 @@ ren_state *ren_position(char *s)
 	return rstate;
 }
 
-/* convert character offset to visual position */
+/** @brief Convert character offset to visual position (screen column). */
 int ren_pos(char *s, int off)
 {
 	ren_state *r = ren_position(s);
 	return off < r->n ? r->pos[off] : 0;
 }
 
-/* convert visual position to character offset */
+/** @brief Convert visual position to character offset. */
 int ren_off(char *s, int p)
 {
 	ren_state *r = ren_position(s);
 	return r->col[p < r->cmax ? p : r->cmax];
 }
 
-/* adjust cursor position */
+/** @brief Adjust cursor position: last screen column of the char at column p, not past the text before '\n'. */
 int ren_cursor(char *s, int p)
 {
 	if (!s)
@@ -194,7 +218,7 @@ int ren_cursor(char *s, int p)
 	return r->pos[i] + r->wid[i] - 1;
 }
 
-/* return an offset before EOL */
+/** @brief Clamp character offset o to the line, before its '\n' unless the line is empty. */
 int ren_noeol(char *s, int o)
 {
 	if (!s)
@@ -204,7 +228,7 @@ int ren_noeol(char *s, int o)
 	return o - (o > 0 && *r->chrs[o] == '\n');
 }
 
-/* the visual position of the next character */
+/** @brief The visual position of the next character in dir from screen column p. */
 int ren_next(char *s, int p, int dir)
 {
 	ren_state *r = ren_position(s);
@@ -216,6 +240,12 @@ int ren_next(char *s, int p, int dir)
 	return r->pos[i] + dir;
 }
 
+/**
+ * @brief Replacement text to draw for the char at s (placeholder, combining
+ * mark on a tatweel, replacement char, or shaped form); NULL draws it as is.
+ * @param s   the character to draw
+ * @param ln  start of the line, context for shaping
+ */
 char *ren_translate(char *s, char *ln)
 {
 	if (s[0] == '\t' || s[0] == '\n')
@@ -236,21 +266,25 @@ char *ren_translate(char *s, char *ln)
 	return opt_shaping ? uc_shape(ln, s, c) : NULL;
 }
 
-/* mapping filetypes to regular expression sets */
+/** Mapping filetypes to regular expression sets: one entry per (ft, set) group of hls[]. */
 struct ftmap {
-	int setbidx;
-	int seteidx;
-	char *ft;
-	rset *rs;
+	int setbidx;	///< first hls[] index of this group
+	int seteidx;	///< one past the last hls[] index
+	char *ft;	///< filetype name (compared by pointer)
+	rset *rs;	///< the group's patterns compiled into one set
 };
-static struct ftmap *ftmap;
-static int ftmidx;
-static rset *syn_ftrs;
-static int blockatt, blockflg, blockdep;
-int ftidx;
-int syn_scdirl;
-int syn_blockhl;
+static struct ftmap *ftmap;	///< built lazily by syn_setft()
+static int ftmidx;	///< number of ftmap[] entries
+static rset *syn_ftrs;	///< file name patterns of fts[]
+static int blockatt, blockflg, blockdep;	///< active block highlight: its attribute, SYN_B* flags, and nesting depth (SYN_BN)
+int ftidx;	///< ftmap[] index of the current filetype
+int syn_scdirl;	///< last scroll direction given to syn_scdir(); 0 = full redraw
+int syn_blockhl;	///< hls[] index of the active block highlight, -1 if none
 
+/**
+ * @brief Build ftmap[fti] from the hls[] entries at n with the same ft and set.
+ * @return nonzero if another set of the same ft follows
+ */
 static int syn_initft(int fti, int n, char *name, int flg)
 {
 	if (fti >= ftmidx)
@@ -266,6 +300,12 @@ static int syn_initft(int fti, int n, char *name, int flg)
 	return i < hlslen && hls[i].ft == name && hls[i].set != set;
 }
 
+/**
+ * @brief Make ft the current filetype (pointers are compared, not strings),
+ * building its ftmap entries on first use. Optional patterns (hlopts) are
+ * reset first.
+ * @return the filetype, or NULL if unknown
+ */
 char *syn_setft(char *ft)
 {
 	int i;
@@ -292,6 +332,7 @@ char *syn_setft(char *ft)
 	goto default_hl;
 }
 
+/** @brief Record the scroll direction; resets block highlight state unless it continues the same way. */
 void syn_scdir(int scdir)
 {
 	if (!scdir || abs(scdir) > xrows || (syn_scdirl > 0) != (scdir > 0)) {
@@ -301,6 +342,7 @@ void syn_scdir(int scdir)
 	}
 }
 
+/** @brief Merge attribute new over old (SYN_OWR in new replaces old entirely). */
 int syn_merge(int old, int new)
 {
 	if (new & SYN_OWR)
@@ -311,6 +353,7 @@ int syn_merge(int old, int new)
 	return flg | (bg << 8) | fg;
 }
 
+/** @brief Whether *att (or the pending block attribute) has a's color bits. */
 static int syn_tatt(int *att, int a, int pb)
 {
 	if (SYN_SET(BATT, a) && pb && (!*att || !SYN_SET(BP, blockflg)))
@@ -318,6 +361,12 @@ static int syn_tatt(int *att, int a, int pb)
 	return (*att & 0xffff) == (a & 0xffff);
 }
 
+/**
+ * @brief Compute attributes att[0, n) for line s with the current filetype.
+ * Each hls[].att entry is one int per group, followed by extra ints if its
+ * flags ask: SYN_ATT/SYN_OATT a count and that many attributes, SYN_BLK one
+ * word of SYN_B* block flags.
+ */
 void syn_highlight(int *att, char *s, int n)
 {
 	int fti = ftidx, blockhl = syn_blockhl, blockcont = -1;
@@ -327,6 +376,7 @@ void syn_highlight(int *att, char *s, int n)
 	int cend, sidx = 0, flg = 0, hl, j, i, ii;
 	while ((sl = rset_find(rs, s + sidx, subs, flg)) >= 0) {
 		cend = uc_len(s + sidx);
+		/* hl: matching hls[] index; sl becomes its group count, catt its att list */
 		hl = sl + ftmap[fti].setbidx;
 		sl = rs->grpnsubc[sl];
 		catt = hls[hl].att;
@@ -346,6 +396,7 @@ void syn_highlight(int *att, char *s, int n)
 			cend = MAX(cend, subs[ii + 1]);
 			if (SYN_SET(SKIP, catt[i]))
 				goto skip;
+			/* [beg, end): matched group as character offsets into att[] */
 			int beg = uc_off(s, sidx + subs[ii]);
 			int end = beg + uc_off(s + sidx + subs[ii], subs[ii + 1] - subs[ii]);
 			if (SYN_SET(ATT, catt[i])) {
@@ -413,12 +464,14 @@ void syn_highlight(int *att, char *s, int n)
 			att[j] = blockatt;
 }
 
+/** @brief Filetype for a file name (hls[0].ft if none matches). */
 char *syn_filetype(char *path)
 {
 	int hl = rset_find(syn_ftrs, path, NULL, 0);
 	return hl >= 0 && hl < ftslen ? fts[hl].ft : hls[0].ft;
 }
 
+/** @brief Recompile the pattern group containing hls[hl] (after its pattern changed). */
 void syn_reloadft(int hl, int flg)
 {
 	if (hl >= 0) {
@@ -434,6 +487,7 @@ void syn_reloadft(int hl, int flg)
 	}
 }
 
+/** @brief hls[] index of the pattern with id in the current filetype, -1 if none. */
 int syn_findhl(int id)
 {
 	int i = ftmap[ftidx].setbidx;
@@ -444,6 +498,7 @@ int syn_findhl(int id)
 	return -1;
 }
 
+/** @brief Set the pattern with id (NULL disables it); returns its hls[] index or -1. */
 int syn_addhl(char *reg, int id)
 {
 	int ret = syn_findhl(id);
@@ -452,6 +507,7 @@ int syn_addhl(char *reg, int id)
 	return ret;
 }
 
+/** @brief Compile the file name patterns of fts[]. */
 void syn_init(void)
 {
 	char *pats[ftslen];
