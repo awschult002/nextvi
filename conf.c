@@ -1,24 +1,36 @@
+/**
+ * @file conf.c
+ * @brief Compile-time configuration: filetypes, syntax highlight patterns,
+ * bidi direction rules, placeholders for unprintable characters, and
+ * lookups into the keymap/digraph tables of kmap.h. Edit and rebuild.
+ *
+ * Filetype names are compared by pointer, not by string (see syn_setft()).
+ */
 #include "kmap.h"
 
-/* access mode of new files */
+/** Access mode of new files (open() with O_CREAT in ex.c). */
 const int conf_mode = 0600;
+/* FTGEN(x) defines the filetype name string x_ft = "x"; FT(x) refers to it */
 #define FTGEN(ft) static char ft##_ft[] = #ft;
 #define FT(ft) ft##_ft
 FTGEN(c) FTGEN(roff) FTGEN(tex) FTGEN(mbox)
 FTGEN(mk) FTGEN(sh) FTGEN(py) FTGEN(js)
 FTGEN(html) FTGEN(diff) FTGEN(go) FTGEN(md)
 
-char _ft[] = "/";	/* default hl */
-char fm_ft[] = "/fm";	/* file manager */
-char n_ft[] = "/#";	/* numbers highlight for ^v */
-char nn_ft[] = "/##";	/* numbers highlight for # */
-char ac_ft[] = "/ac";	/* autocomplete dropdown */
-char ex_ft[] = "/ex";	/* ex mode (is never '\n' terminated) */
-char vs_ft[] = "/vs";	/* vi search prompt (is never '\n' terminated) */
-char bar_ft[] = "/-";	/* status bar (is never '\n' terminated) */
-char fuzz_ft[] = "/f";	/* fuzzy search prompt (is never '\n' terminated) */
-char msg_ft[] = "/>";	/* ex message (is never '\n' terminated) */
+/* Internal filetypes for the editor's own prompts and views */
+char _ft[] = "/";	///< default hl
+char fm_ft[] = "/fm";	///< file manager
+char n_ft[] = "/#";	///< numbers highlight for ^v
+char nn_ft[] = "/##";	///< numbers highlight for #
+char ac_ft[] = "/ac";	///< autocomplete dropdown
+char ex_ft[] = "/ex";	///< ex mode (is never '\n' terminated)
+char vs_ft[] = "/vs";	///< vi search prompt (is never '\n' terminated)
+char bar_ft[] = "/-";	///< status bar (is never '\n' terminated)
+char fuzz_ft[] = "/f";	///< fuzzy search prompt (is never '\n' terminated)
+char msg_ft[] = "/>";	///< ex message (is never '\n' terminated)
 
+/** Filetypes chosen by file name pattern; the {ft, NULL} entries only
+ * register the internal filetypes. */
 struct filetype fts[] = {
 	{FT(c), "\\.(c|h|cpp|hpp|cc|cs)$"},			/* C */
 	{FT(roff), "\\.(ms|tr|roff|tmac|txt|[1-9])$"},		/* troff */
@@ -43,8 +55,9 @@ struct filetype fts[] = {
 	{fuzz_ft, NULL},
 	{msg_ft, NULL}
 };
-const int ftslen = LEN(fts);
+const int ftslen = LEN(fts);	///< number of entries in fts[]
 
+/* Color numbers for the attributes in hls[] (see SYN_* in vi.h) */
 #define NA	0	/* no attribute */
 #define RE	1	/* red */
 #define GR	2	/* green */
@@ -62,10 +75,17 @@ const int ftslen = LEN(fts);
 #define CY1	14	/* bright cyan */
 #define WH1	15	/* bright white */
 
+/* A(...): compound literal for a struct highlight att array */
 #define A(...) (int[]){__VA_ARGS__}
 
 /* At least 1 entry is required in this struct for fallback */
 /* lbuf lines are *always "\n\0" terminated, for $ to work one needs to account for '\n' too */
+/**
+ * Highlight patterns. Consecutive entries with the same ft and set are
+ * compiled into one rset (see syn_initft()). Entries with pat NULL and an
+ * id are slots filled at run time by syn_addhl(): id 1 word/fuzzy search
+ * (hlw), 2 current line (hll), 3 matching pair (hlp).
+ */
 struct highlight hls[] = {
 	{_ft, NULL, A(CY1 | SYN_BD), 1, 2},  /* <-- optional, used by hll if set */
 	{_ft, NULL, A(RE1 | SYN_BGMK(GR1)), 0, 3}, /* <-- optional, used by hlp if set */
@@ -323,13 +343,13 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
 
 	{msg_ft, ".+", A(AY1 | SYN_BD)},
 };
-const int hlslen = LEN(hls);
+const int hlslen = LEN(hls);	///< number of entries in hls[]
 
-/* ids of optional hls, reset and reloaded on filetype change */
+/** Ids of optional hls, reset and reloaded on filetype change. */
 const int hlopts[] = {1, 2};
-const int hloptslen = LEN(hlopts);
+const int hloptslen = LEN(hlopts);	///< number of entries in hlopts[]
 
-/* how to highlight text in the reverse direction */
+/** Attribute merged into adjacent characters shown in reverse order (see ex.c). */
 const int conf_hlrev = SYN_BGMK(8);
 
 /* right-to-left characters */
@@ -337,31 +357,37 @@ const int conf_hlrev = SYN_BGMK(8);
 /* neutral characters */
 #define CNEUT		"\x1- !-/:-@[-`{-\x7f"
 
+/** Line direction context: the first match decides it (-1 RTL, +1 LTR). */
 struct dircontext dctxs[] = {
 	{"^[" CR2L "]", -1},
 	{"^[a-zA-Z_0-9]", +1},
 };
-const int dctxlen = LEN(dctxs);
+const int dctxlen = LEN(dctxs);	///< number of entries in dctxs[]
 
+/** Direction marks: text matched by a pattern (or its groups, per dir[])
+ * is laid out in that direction; ctx limits the context it applies in. */
 struct dirmark dmarks[] = {
 	{"[" CR2L "][" CNEUT CR2L "]*[" CR2L "]", +1, {-1}},
 	{"^([ \t]+)?([" CNEUT "]*[^" CR2L "]*[^" CR2L CNEUT "](?:[" CNEUT "]+$)?)", -1, {0, 1, -1}},
 	{"[^" CR2L CNEUT "][^" CR2L "]*[^" CR2L CNEUT "](?:[" CNEUT "]+$)?", -1, {-1}},
 };
-const int dmarkslen = LEN(dmarks);
+const int dmarkslen = LEN(dmarks);	///< number of entries in dmarks[]
 
+/** Default placeholders: control chars shown as "^", ZWNJ/ZWJ as "-". */
 struct placeholder _ph[2] = {
 	{{0x0,0x1f}, "^", 1, 1},
 	{{0x200c,0x200d}, "-", 1, 3},
 };
-struct placeholder *ph = _ph;
-int phlen = LEN(_ph);
+struct placeholder *ph = _ph;	///< active placeholder list: _ph, or a malloc'd list built by `:ph`
+int phlen = LEN(_ph);	///< number of entries in ph
 
+/** @brief The keymap table kmaps[id] (entry 0 is its name). */
 char **conf_kmap(int id)
 {
 	return kmaps[id];
 }
 
+/** @brief Index of the keymap called name in kmaps[], 0 if not found. */
 int conf_kmapfind(char *name)
 {
 	for (int i = 0; i < LEN(kmaps); i++)
@@ -370,6 +396,7 @@ int conf_kmapfind(char *name)
 	return 0;
 }
 
+/** @brief The character for digraph c1 c2, NULL if none. */
 char *conf_digraph(int c1, int c2)
 {
 	for (int i = 0; i < LEN(digraphs); i++)
