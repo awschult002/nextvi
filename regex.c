@@ -9,6 +9,15 @@
  * `(?=)` `(?!)` lookahead, `(?>)` `(?<)` positive/negative test starting one
  * char back (N bytes back after `(?#N)`, the string start if N < 0),
  * lazy `??` `*?` `+?`, `{n,m}`.
+ *
+ * Lookaround semantics (surprising, read before editing): the body runs as
+ * an UNANCHORED search starting at the test point, and `^` inside the body
+ * anchors to that point. So `(?=foo)` means "foo appears somewhere ahead",
+ * not "foo is next"; write `(?=^foo)` for the latter. The literal fast path
+ * (direct compare, no nested VM) is used only when the body starts with `^`,
+ * has no metacharacters, and REG_ICASE is off. `(?#N)` is sticky: it sets
+ * the start offset for every lookaround after it in the pattern, not just
+ * the next one.
  * Program words: opcode then operands; offsets are relative to the end of
  * the 2-word instruction (REL).
  */
@@ -168,6 +177,7 @@ static int compilecode(char *re_loc, rcode *prog, rctx *ctx, int sizecode, int f
 				if (*re == ':')
 					goto non_capture;
 				else if (*re == '#') {
+					/* never reset: applies to all later lookarounds */
 					lb_start = atoi(re+1);
 					if (!(re = strchr(re, ')')))
 						return -1;
@@ -608,6 +618,11 @@ if (spc > JMP) { \
 		for (j = npc[3], cnt = 0; cnt < j && s0[cnt] == s1[cnt]; cnt++); \
 		cnt = cnt == j; \
 	} else if (!lb[j] || s0 > lb[j]) { \
+		/* lb[j] caches the match start of lookaround j: a success is \
+		 * reused while s0 has not passed it (valid only because the body \
+		 * is an unanchored search), a failure (NULL) is always rerun. \
+		 * The nested VM's _return sets utf8_length[eol_ch] back to 1, \
+		 * so it is re-zeroed below to keep the REG_NEWLINE trick. */ \
 		cnt = re_pikevm(prog->la[j], s0, _subp, 2, 0); \
 		if (eol_ch) \
 			utf8_length[eol_ch] = 0; \
