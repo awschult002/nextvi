@@ -1,7 +1,7 @@
 /* Document bytes and render character offsets are separate coordinate spaces. */
 struct ts_capture {
 	uint32_t beg, end, pattern, order;
-	int att;
+	s64 att;
 };
 struct ts_state {
 	struct ts_state *next;
@@ -9,32 +9,32 @@ struct ts_state {
 	TSParser *parser;
 	TSTree *tree;
 	uint32_t *offset;
-	int rows, dirty, language;
+	s64 rows, dirty, language;
 	unsigned long revision;
 	struct ts_capture *captures;
-	int capture_n, capture_size, cache_beg, cache_end;
-	int preview, beg, end, pending_n, cursor;
+	s64 capture_n, capture_size, cache_beg, cache_end;
+	s64 preview, beg, end, pending_n, cursor;
 	char *pending, **lines;
 	char *readbuf;
 };
 static struct {
 	TSQuery *query;
-	int *attributes;
-	int initialized, failed;
+	s64 *attributes;
+	s64 initialized, failed;
 } ts_config[LEN(ts_languages)];
 static struct ts_state *ts_states;
 struct ts_state *ts_preview;
-int ts_redraw;
+s64 ts_redraw;
 static rset *ts_word;
 
 static void ts_diagnostic(void)
 {
-	static int warned;
+	static s64 warned;
 	if (!warned++)
 		fprintf(stderr, "Tree-sitter initialization failed; using regex highlighting\n");
 }
 
-static int ts_configure(int language)
+static s64 ts_configure(s64 language)
 {
 	uint32_t offset, count, len;
 	TSQueryError error;
@@ -43,7 +43,7 @@ static int ts_configure(int language)
 	ts_config[language].initialized = 1;
 	const TSLanguage *lang = ts_languages[language].language();
 	TSParser *parser = ts_parser_new();
-	int valid = ts_parser_set_language(parser, lang);
+	s64 valid = ts_parser_set_language(parser, lang);
 	ts_parser_delete(parser);
 	TSQuery *query = valid ? ts_query_new(lang, ts_languages[language].query,
 		strlen(ts_languages[language].query), &offset, &error) : NULL;
@@ -61,11 +61,11 @@ static int ts_configure(int language)
 	}
 	ts_config[language].query = query;
 	count = ts_query_capture_count(query);
-	ts_config[language].attributes = emalloc(count * sizeof(int));
+	ts_config[language].attributes = emalloc(count * sizeof(s64));
 	for (uint32_t i = 0; i < count; i++) {
 		const char *name = ts_query_capture_name_for_id(query, i, &len);
 		ts_config[language].attributes[i] = 0;
-		for (int j = 0; j < LEN(ts_attributes); j++)
+		for (s64 j = 0; j < LEN(ts_attributes); j++)
 			if (strlen(ts_attributes[j].name) == len &&
 					!memcmp(name, ts_attributes[j].name, len))
 				ts_config[language].attributes[i] = ts_attributes[j].att;
@@ -73,7 +73,7 @@ static int ts_configure(int language)
 	return 1;
 }
 
-char *ts_line(struct ts_state *s, int row)
+char *ts_line(struct ts_state *s, s64 row)
 {
 	if (!s || row < 0 || row >= s->rows)
 		return NULL;
@@ -94,7 +94,7 @@ static const char *ts_read(void *payload, uint32_t byte, TSPoint point, uint32_t
 		return "";
 	uint32_t len = s->offset[point.row + 1] - s->offset[point.row];
 	/* Slot 1 may temporarily hide bytes beyond lim. */
-	for (int i = 0; i < 2; i++) {
+	for (s64 i = 0; i < 2; i++) {
 		ren_state *r = rstates + i;
 		if (r->s == line && r->holelen) {
 			s->readbuf = erealloc(s->readbuf, len);
@@ -108,7 +108,7 @@ static const char *ts_read(void *payload, uint32_t byte, TSPoint point, uint32_t
 	return line + point.column;
 }
 
-static int ts_parse(struct ts_state *s)
+static s64 ts_parse(struct ts_state *s)
 {
 	if (!s->dirty)
 		return s->tree != NULL;
@@ -122,7 +122,7 @@ static int ts_parse(struct ts_state *s)
 	return 1;
 }
 
-static struct ts_state *ts_new(struct lbuf *lb, int language)
+static struct ts_state *ts_new(struct lbuf *lb, s64 language)
 {
 	struct ts_state *s = emalloc(sizeof(*s));
 	memset(s, 0, sizeof(*s));
@@ -136,7 +136,7 @@ static struct ts_state *ts_new(struct lbuf *lb, int language)
 	s->rows = lb->ln_n;
 	s->offset = emalloc((s->rows + 1) * sizeof(*s->offset));
 	s->offset[0] = 0;
-	for (int i = 0; i < s->rows; i++)
+	for (s64 i = 0; i < s->rows; i++)
 		s->offset[i + 1] = s->offset[i] + lbuf_s(lb->ln[i])->len + 1;
 	s->next = ts_states;
 	ts_states = s;
@@ -174,10 +174,10 @@ void ts_free(struct ts_state *s)
 
 struct ts_state *ts_document(struct lbuf *lb)
 {
-	int language = -1;
+	s64 language = -1;
 	if (xhl <= 1 || !lb)
 		return NULL;
-	for (int i = 0; i < LEN(ts_languages); i++)
+	for (s64 i = 0; i < LEN(ts_languages); i++)
 		if (syn_getft() == ts_languages[i].ft)
 			language = i;
 	const char *path = ex_buf && xb == lb ? xb_path : "";
@@ -199,21 +199,21 @@ struct ts_state *ts_document(struct lbuf *lb)
 }
 
 /* Update the old tree and index before the line array moves. */
-static void ts_splice(struct ts_state *s, int row, int del, uint32_t *lengths, int ins)
+static void ts_splice(struct ts_state *s, s64 row, s64 del, uint32_t *lengths, s64 ins)
 {
 	uint32_t added = 0, start = s->offset[row], oldend = s->offset[row + del];
-	for (int i = 0; i < ins; i++)
+	for (s64 i = 0; i < ins; i++)
 		added += lengths[i];
 	TSInputEdit edit = {start, oldend, start + added,
 		{row, 0}, {row + del, 0}, {row + ins, 0}};
 	if (s->tree)
 		ts_tree_edit(s->tree, &edit);
-	int rows = s->rows + ins - del;
+	s64 rows = s->rows + ins - del;
 	uint32_t *index = emalloc((rows + 1) * sizeof(*index));
 	memcpy(index, s->offset, (row + 1) * sizeof(*index));
-	for (int i = 0; i < ins; i++)
+	for (s64 i = 0; i < ins; i++)
 		index[row + i + 1] = index[row + i] + lengths[i];
-	for (int i = row + del + 1; i <= s->rows; i++)
+	for (s64 i = row + del + 1; i <= s->rows; i++)
 		index[i + ins - del] = s->offset[i] - oldend + start + added;
 	free(s->offset);
 	s->offset = index;
@@ -222,7 +222,7 @@ static void ts_splice(struct ts_state *s, int row, int del, uint32_t *lengths, i
 	s->cache_beg = -1;
 }
 
-void ts_edit(struct lbuf *lb, int row, int del, char **lines, int ins)
+void ts_edit(struct lbuf *lb, s64 row, s64 del, char **lines, s64 ins)
 {
 	lb->ts_revision++;
 	if (xhl > 1)
@@ -230,14 +230,14 @@ void ts_edit(struct lbuf *lb, int row, int del, char **lines, int ins)
 	if (!lb->ts)
 		return;
 	uint32_t *lengths = emalloc(MAX(1, ins) * sizeof(*lengths));
-	for (int i = 0; i < ins; i++)
+	for (s64 i = 0; i < ins; i++)
 		lengths[i] = lbuf_s(lines[i])->len + 1;
 	ts_splice(lb->ts, row, del, lengths, ins);
 	lb->ts->revision = lb->ts_revision;
 	free(lengths);
 }
 
-struct ts_state *ts_preview_begin(struct lbuf *lb, int beg, int end)
+struct ts_state *ts_preview_begin(struct lbuf *lb, s64 beg, s64 end)
 {
 	struct ts_state *base = ts_document(lb);
 	if (!base || !ts_parse(base))
@@ -249,11 +249,11 @@ struct ts_state *ts_preview_begin(struct lbuf *lb, int beg, int end)
 	return s;
 }
 
-int ts_preview_update(struct ts_state *s, char *text)
+s64 ts_preview_update(struct ts_state *s, char *text)
 {
 	if (!s->lb)
 		return 0;
-	int len = strlen(text), count = 0;
+	s64 len = strlen(text), count = 0;
 	char *copy = emalloc(len + 2);
 	memcpy(copy, text, len);
 	if (!len || copy[len - 1] != '\n')
@@ -270,29 +270,29 @@ int ts_preview_update(struct ts_state *s, char *text)
 		s->rows = s->lb->ln_n;
 		s->offset = erealloc(s->offset, (s->rows + 1) * sizeof(*s->offset));
 		s->offset[0] = 0;
-		for (int i = 0; i < s->rows; i++)
+		for (s64 i = 0; i < s->rows; i++)
 			s->offset[i + 1] = s->offset[i] + lbuf_s(s->lb->ln[i])->len + 1;
 	}
 	if (s->preview && !memcmp(s->pending, copy, MIN(len + 1,
-		(int)(s->offset[s->beg + s->pending_n] - s->offset[s->beg]) + 1)) &&
+		(s64)(s->offset[s->beg + s->pending_n] - s->offset[s->beg]) + 1)) &&
 		(uint32_t)len == s->offset[s->beg + s->pending_n] - s->offset[s->beg]) {
 		free(copy);
 		return 0;
 	}
-	for (int i = 0; i < len; i++)
+	for (s64 i = 0; i < len; i++)
 		count += copy[i] == '\n';
 	char **lines = emalloc(count * sizeof(*lines));
 	uint32_t *lengths = emalloc(count * sizeof(*lengths));
-	int row = 0, start = 0;
-	for (int i = 0; i < len; i++)
+	s64 row = 0, start = 0;
+	for (s64 i = 0; i < len; i++)
 		if (copy[i] == '\n') {
 			lines[row] = copy + start;
 			lengths[row++] = i + 1 - start;
 			start = i + 1;
 		}
 	/* Common complete lines remain unchanged in the edited tree. */
-	int oldcount = s->preview ? s->pending_n : s->end - s->beg;
-	int first = 0, last = 0;
+	s64 oldcount = s->preview ? s->pending_n : s->end - s->beg;
+	s64 first = 0, last = 0;
 	while (first < MIN(count, oldcount) &&
 		lengths[first] == s->offset[s->beg + first + 1] - s->offset[s->beg + first] &&
 		!memcmp(lines[first], ts_line(s, s->beg + first), lengths[first]))
@@ -313,7 +313,7 @@ int ts_preview_update(struct ts_state *s, char *text)
 	return 1;
 }
 
-static int ts_capture_cmp(const void *a, const void *b)
+static s64 ts_capture_cmp(const void *a, const void *b)
 {
 	const struct ts_capture *x = a, *y = b;
 	if (x->pattern != y->pattern)
@@ -321,7 +321,7 @@ static int ts_capture_cmp(const void *a, const void *b)
 	return x->order < y->order ? -1 : x->order != y->order;
 }
 
-static void ts_query_line(struct ts_state *s, int row)
+static void ts_query_line(struct ts_state *s, s64 row)
 {
 	if (s->cache_beg >= 0 && row >= s->cache_beg && row < s->cache_end)
 		return;
@@ -333,9 +333,9 @@ static void ts_query_line(struct ts_state *s, int row)
 	ts_query_cursor_exec(cursor, ts_config[s->language].query, ts_tree_root_node(s->tree));
 	TSQueryMatch match;
 	while (ts_query_cursor_next_match(cursor, &match))
-		for (int i = 0; i < match.capture_count; i++) {
+		for (s64 i = 0; i < match.capture_count; i++) {
 			TSQueryCapture capture = match.captures[i];
-			int att = ts_config[s->language].attributes[capture.index];
+			s64 att = ts_config[s->language].attributes[capture.index];
 			if (!att)
 				continue;
 			if (s->capture_n == s->capture_size) {
@@ -353,7 +353,7 @@ static void ts_query_line(struct ts_state *s, int row)
 
 struct ts_source {
 	struct ts_state *state;
-	int row, col;
+	s64 row, col;
 };
 
 static void ts_setword(char *word)
@@ -367,10 +367,10 @@ static void ts_setword(char *word)
 
 static void ts_cursor(led_ctx *x, struct ts_source *source)
 {
-	int row = source->state->preview ? source->state->cursor : xrow;
-	int hl = xhll && source->row == row ? syn_findhl(2) : -1;
+	s64 row = source->state->preview ? source->state->cursor : xrow;
+	s64 hl = xhll && source->row == row ? syn_findhl(2) : -1;
 	if (hl >= 0)
-		for (int i = 0; i < x->alen; i++)
+		for (s64 i = 0; i < x->alen; i++)
 			x->att[i] = syn_merge(x->att[i], hls[hl].att[0]);
 	hl = xhlw && ts_word ? syn_findhl(1) : -1;
 	if (hl < 0)
@@ -380,15 +380,15 @@ static void ts_cursor(led_ctx *x, struct ts_source *source)
 	char *line = emalloc(len + 1);
 	memcpy(line, text, len);
 	line[len] = '\0';
-	int pos = 0, subs[ts_word->nsubc];
-	while (pos < (int)len && rset_find(ts_word, line + pos, subs, pos ? REG_NOTBOL : 0) >= 0) {
-		int beg = pos + subs[0], end = pos + subs[1];
-		if (end > (int)len)
+	s64 pos = 0, subs[ts_word->nsubc];
+	while (pos < (s64)len && rset_find(ts_word, line + pos, subs, pos ? REG_NOTBOL : 0) >= 0) {
+		s64 beg = pos + subs[0], end = pos + subs[1];
+		if (end > (s64)len)
 			break;
-		for (int i = 0; i < x->alen; i++) {
-			int off = x->bound ? x->stt[i] : i;
-			int byte = source->col + (x->r->chrs[off] - x->s0);
-			int index = led_attidx(x, off);
+		for (s64 i = 0; i < x->alen; i++) {
+			s64 off = x->bound ? x->stt[i] : i;
+			s64 byte = source->col + (x->r->chrs[off] - x->s0);
+			s64 index = led_attidx(x, off);
 			if (byte >= beg && byte < end && index >= 0)
 				x->att[index] = syn_merge(x->att[index], hls[hl].att[0]);
 		}
@@ -410,14 +410,14 @@ static void ext_treesitter(led_ext *p, led_ctx *x)
 	}
 	ts_query_line(s, source->row);
 	uint32_t base = s->offset[source->row] + source->col;
-	for (int i = 0; i < s->capture_n; i++) {
+	for (s64 i = 0; i < s->capture_n; i++) {
 		struct ts_capture *c = s->captures + i;
 		if (c->end <= base || c->beg >= s->offset[source->row + 1])
 			continue;
-		for (int j = 0; j < x->alen; j++) {
-			int off = x->bound ? x->stt[j] : j;
+		for (s64 j = 0; j < x->alen; j++) {
+			s64 off = x->bound ? x->stt[j] : j;
 			uint32_t byte = base + (x->r->chrs[off] - x->s0);
-			int index = led_attidx(x, off);
+			s64 index = led_attidx(x, off);
 			if (byte >= c->beg && byte < c->end && index >= 0)
 				x->att[index] = syn_merge(x->att[index], c->att);
 		}
@@ -425,31 +425,31 @@ static void ext_treesitter(led_ext *p, led_ctx *x)
 	ts_cursor(x, source);
 }
 
-static int ts_preview_row(int ps)
+static s64 ts_preview_row(s64 ps)
 {
-	int row = ts_preview->beg;
-	for (int i = 0; i < ps; i++)
+	s64 row = ts_preview->beg;
+	for (s64 i = 0; i < ps; i++)
 		row += ts_preview->pending[i] == '\n';
 	return ts_preview->cursor = row;
 }
 
-static void led_preview_current(char *text, int ps, int lncol)
+static void led_preview_current(char *text, s64 ps, s64 lncol)
 {
 	led_srender(text, -1, lncol, xleft, xleft + xcols - lncol,
 		ts_preview, ts_preview_row(ps), 0)
 }
 
 /* Preview rows use the same wrap width and character positions as buffer rows. */
-static int led_preview_height(int row, int trow, int paint)
+static s64 led_preview_height(s64 row, s64 trow, s64 paint)
 {
 	char *line = ts_line(ts_preview, row);
-	int len = line ? ts_preview->offset[row + 1] - ts_preview->offset[row] : 1;
+	s64 len = line ? ts_preview->offset[row + 1] - ts_preview->offset[row] : 1;
 	char *copy = emalloc(len + 4);
 	memcpy(copy, line ? line : "~", len);
 	memset(copy + len, 0, 4);
-	int w = ren_wrapw(vi_lncol), h = MAX(0, ren_position(copy)->cmax) / w + 1;
+	s64 w = ren_wrapw(vi_lncol), h = MAX(0, ren_position(copy)->cmax) / w + 1;
 	if (paint)
-		for (int k = MAX(0, -trow); k < h && trow + k < ts_winh; k++)
+		for (s64 k = MAX(0, -trow); k < h && trow + k < ts_winh; k++)
 			led_srender(copy, ts_winy + trow + k, ts_winx + vi_lncol, k * w, k * w + w,
 				ts_preview, row, 0)
 	rstate->s = NULL;
@@ -457,13 +457,13 @@ static int led_preview_height(int row, int trow, int paint)
 	return h;
 }
 
-static void led_preview_wrapped(int current)
+static void led_preview_wrapped(s64 current)
 {
 	preserve(ren_state*, rstate, rstate = rstates + 1;)
-	int trow = led_row;
-	for (int row = xtop; row < current; row++)
+	s64 trow = led_row;
+	for (s64 row = xtop; row < current; row++)
 		trow -= led_preview_height(row, 0, 0);
-	for (int row = xtop; trow < ts_winh; row++)
+	for (s64 row = xtop; trow < ts_winh; row++)
 		if (row == current)
 			trow = led_row + led_rowh;
 		else
@@ -471,21 +471,21 @@ static void led_preview_wrapped(int current)
 	restore(rstate)
 }
 
-static void led_preview_draw(int ps)
+static void led_preview_draw(s64 ps)
 {
-	int current = ts_preview_row(ps);
+	s64 current = ts_preview_row(ps);
 	if (led_lw) {
 		led_preview_wrapped(current);
 		return;
 	}
 	preserve(ren_state*, rstate, rstate = rstates + 1;)
-	for (int row = xtop; row < xtop + xrows; row++) {
+	for (s64 row = xtop; row < xtop + xrows; row++) {
 		if (row == current)
 			continue;
 		char *line = ts_line(ts_preview, row);
 		/* Pending lines share an allocation, so terminate a render copy. */
 		if (line && row >= ts_preview->beg && row < ts_preview->beg + ts_preview->pending_n) {
-			int len = ts_preview->offset[row + 1] - ts_preview->offset[row];
+			s64 len = ts_preview->offset[row + 1] - ts_preview->offset[row];
 			char *copy = emalloc(len + 4);
 			memcpy(copy, line, len);
 			memset(copy + len, 0, 4);
@@ -507,8 +507,8 @@ void ts_init(void)
 		led_extnew()->ext_func = ext_treesitter;
 }
 
-void led_render_source(char *s0, int cbeg, int cend, struct ts_state *source,
-	int row, int col)
+void led_render_source(char *s0, s64 cbeg, s64 cend, struct ts_state *source,
+	s64 row, s64 col)
 {
 	struct ts_source data = {source, row, col};
 	led_ext *p = led_extfind(ext_treesitter);
@@ -532,7 +532,7 @@ void ts_done(void)
 			ts_states->lb->ts = NULL;
 		ts_free(ts_states);
 	}
-	for (int i = 0; i < LEN(ts_config); i++) {
+	for (s64 i = 0; i < LEN(ts_config); i++) {
 		ts_query_delete(ts_config[i].query);
 		free(ts_config[i].attributes);
 		memset(ts_config + i, 0, sizeof(ts_config[i]));

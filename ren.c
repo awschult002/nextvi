@@ -2,11 +2,11 @@ static rset *dir_rslr;	/* pattern of marks for left-to-right strings */
 static rset *dir_rsrl;	/* pattern of marks for right-to-left strings */
 static rset *dir_rsctx;	/* direction context patterns */
 
-static void dir_reverse(int *ord, int beg, int end)
+static void dir_reverse(s64 *ord, s64 beg, s64 end)
 {
 	end--;
 	while (beg < end) {
-		int tmp = ord[beg];
+		s64 tmp = ord[beg];
 		ord[beg] = ord[end];
 		ord[end] = tmp;
 		beg++;
@@ -15,12 +15,12 @@ static void dir_reverse(int *ord, int beg, int end)
 }
 
 /* reorder the characters based on direction marks and characters */
-static int dir_reorder(char *s, char *se, int *ord, int end, int dir)
+static s64 dir_reorder(char *s, char *se, s64 *ord, s64 end, s64 dir)
 {
 	rset *rs = dir < 0 ? dir_rsrl : dir_rslr;
-	int beg = 0, off, c_beg, c_end;
-	int subs[LEN(dmarks[0].dir) * 2], found, i;
-	int flg = se > s && se[-1] == '\n' ? REG_NEWLINE : 0;
+	s64 beg = 0, off, c_beg, c_end;
+	s64 subs[LEN(dmarks[0].dir) * 2], found, i;
+	s64 flg = se > s && se[-1] == '\n' ? REG_NEWLINE : 0;
 	while (se > s && (found = rset_find(rs, s, subs, flg)) >= 0) {
 		for (i = 0; i < end; i++)
 			ord[i] = i;
@@ -42,9 +42,9 @@ static int dir_reorder(char *s, char *se, int *ord, int end, int dir)
 }
 
 /* return the direction context of the given line */
-int dir_context(char *s)
+s64 dir_context(char *s)
 {
-	int found;
+	s64 found;
 	if (xtd > +1)
 		return +1;
 	if (xtd < -1)
@@ -60,7 +60,7 @@ void dir_init(void)
 	char *relr[128];
 	char *rerl[128];
 	char *ctx[128];
-	int i;
+	s64 i;
 	for (i = 0; i < dmarkslen; i++) {
 		relr[i] = dmarks[i].ctx >= 0 ? dmarks[i].pat : NULL;
 		rerl[i] = dmarks[i].ctx <= 0 ? dmarks[i].pat : NULL;
@@ -72,23 +72,23 @@ void dir_init(void)
 	dir_rsctx = rset_make(i, ctx, 0);
 }
 
-static int ren_cwid(char *s, int pos)
+static s64 ren_cwid(char *s, s64 pos)
 {
 	if (s[0] == '\t')
 		return xts ? xts - (pos % xts) : 0;
 	if (s[0] == '\n')
 		return 1;
-	int c, l; uc_code(c, s, l)
-	for (int i = 0; i < phlen; i++)
+	s64 c, l; uc_code(c, s, l)
+	for (s64 i = 0; i < phlen; i++)
 		if (c >= ph[i].cp[0] && c <= ph[i].cp[1] && l == ph[i].l)
 			return ph[i].wid;
 	return uc_wid(c);
 }
 
 /* the number of columns a wrapped segment holds */
-int ren_wrapw(int lncol)
+s64 ren_wrapw(s64 lncol)
 {
-	int w = MIN(xlw, xcols) - lncol;
+	s64 w = MIN(xlw, xcols) - lncol;
 	return w > 0 ? w : 1;
 }
 
@@ -108,10 +108,10 @@ ren_state *ren_position(char *s)
 	}
 	rstate->s = s;
 	rstate->ctx = dir_context(s);
-	unsigned int n, max, l;
+	u64 n, max, l;
 	char *ss = s;
 	if (xlim >= 0 && !xlw && rstate == rstates+1) {
-		max = (unsigned int)xlim;
+		max = (u64)xlim;
 		for (n = 0; n < max && (l = uc_len(ss)); n++)
 			ss += l;
 		rstate->holelen = uc_len(ss);
@@ -120,17 +120,17 @@ ren_state *ren_position(char *s)
 	} else
 		for (n = 0; (l = uc_len(ss)); n++)
 			ss += l;
-	unsigned int b = n + 1, c = 2, i;
-	int cpos = 0, wid, *col;
-	int *pos = emalloc((b * 2 * sizeof(pos[0])) + b * sizeof(char*));
-	int *off = &pos[b];
+	u64 b = n + 1, c = 2, i;
+	s64 cpos = 0, wid, *col;
+	s64 *pos = emalloc((b * 2 * sizeof(pos[0])) + b * sizeof(char*));
+	s64 *off = &pos[b];
 	char **chrs = (char**)&off[b];
 	if (xorder && dir_reorder(s, ss, off, n, rstate->ctx)) {
 		for (i = 0; i < b; i++) {
 			chrs[i] = s;
 			s += uc_len(s);
 		}
-		int *wids = emalloc(n * sizeof(wids[0]));
+		s64 *wids = emalloc(n * sizeof(wids[0]));
 		for (i = 0; i < n; i++) {
 			wid = ren_cwid(chrs[off[i]], cpos);
 			pos[off[i]] = cpos;
@@ -176,33 +176,33 @@ ren_state *ren_position(char *s)
 }
 
 /* convert character offset to visual position */
-int ren_pos(char *s, int off)
+s64 ren_pos(char *s, s64 off)
 {
 	ren_state *r = ren_position(s);
 	return off < r->n ? r->pos[off] : 0;
 }
 
 /* convert visual position to character offset */
-int ren_off(char *s, int p)
+s64 ren_off(char *s, s64 p)
 {
 	ren_state *r = ren_position(s);
 	return r->col[p < r->cmax ? p : r->cmax];
 }
 
 /* adjust cursor position */
-int ren_cursor(char *s, int p)
+s64 ren_cursor(char *s, s64 p)
 {
 	if (!s)
 		return 0;
 	ren_state *r = ren_position(s);
 	if (p >= r->cmax)
 		p = r->cmax - (*r->chrs[r->col[r->cmax]] == '\n');
-	int i = r->col[p];
+	s64 i = r->col[p];
 	return r->pos[i] + r->wid[i] - 1;
 }
 
 /* return an offset before EOL */
-int ren_noeol(char *s, int o)
+s64 ren_noeol(char *s, s64 o)
 {
 	if (!s)
 		return 0;
@@ -212,12 +212,12 @@ int ren_noeol(char *s, int o)
 }
 
 /* the visual position of the next character */
-int ren_next(char *s, int p, int dir)
+s64 ren_next(char *s, s64 p, s64 dir)
 {
 	ren_state *r = ren_position(s);
 	if (p+dir < 0 || p > r->cmax)
 		return r->pos[r->col[r->cmax]];
-	int i = r->col[p];
+	s64 i = r->col[p];
 	if (r->wid[i] > 1 && dir > 0)
 		return r->pos[i] + r->wid[i];
 	return r->pos[i] + dir;
@@ -227,8 +227,8 @@ char *ren_translate(char *s, char *ln)
 {
 	if (s[0] == '\t' || s[0] == '\n')
 		return NULL;
-	int c, l; uc_code(c, s, l)
-	for (int i = 0; i < phlen; i++)
+	s64 c, l; uc_code(c, s, l)
+	for (s64 i = 0; i < phlen; i++)
 		if (c >= ph[i].cp[0] && c <= ph[i].cp[1] && l == ph[i].l)
 			return ph[i].d;
 	if (l == 1)
@@ -245,24 +245,24 @@ char *ren_translate(char *s, char *ln)
 
 /* mapping filetypes to regular expression sets */
 struct ftmap {
-	int setbidx;
-	int seteidx;
+	s64 setbidx;
+	s64 seteidx;
 	char *ft;
 	rset *rs;
 };
 static struct ftmap *ftmap;
-static int ftmidx;
+static s64 ftmidx;
 static rset *syn_ftrs;
-static int blockatt, blockflg, blockdep;
-int ftidx;
-int syn_scdirl;
-int syn_blockhl;
+static s64 blockatt, blockflg, blockdep;
+s64 ftidx;
+s64 syn_scdirl;
+s64 syn_blockhl;
 
-static int syn_initft(int fti, int n, char *name, int flg)
+static s64 syn_initft(s64 fti, s64 n, char *name, s64 flg)
 {
 	if (fti >= ftmidx)
 		ftmap = erealloc(ftmap, (fti + 1) * sizeof(*ftmap));
-	int i = n, set = hls[i].set;
+	s64 i = n, set = hls[i].set;
 	char *pats[hlslen];
 	for (; i < hlslen && hls[i].ft == name && hls[i].set == set; i++)
 		pats[i - n] = hls[i].pat;
@@ -280,7 +280,7 @@ char *syn_getft(void)
 
 char *syn_setft(char *ft)
 {
-	int i;
+	s64 i;
 	if (ftmidx)
 		for (i = 0; i < hloptslen; i++)
 			syn_addhl(NULL, hlopts[i]);
@@ -304,46 +304,46 @@ char *syn_setft(char *ft)
 	goto default_hl;
 }
 
-void syn_scdir(int scdir)
+void syn_scdir(s64 scdir)
 {
-	if (!scdir || abs(scdir) > xrows || (syn_scdirl > 0) != (scdir > 0)) {
+	if (!scdir || labs(scdir) > xrows || (syn_scdirl > 0) != (scdir > 0)) {
 		syn_scdirl = scdir;
 		syn_blockhl = -1;
 		blockdep = 0;
 	}
 }
 
-int syn_merge(int old, int new)
+s64 syn_merge(s64 old, s64 new)
 {
 	if (new & SYN_OWR)
 		return new & ~SYN_OWR;
-	int fg = SYN_FGSET(new) ? SYN_FG(new) : SYN_FG(old);
-	int bg = SYN_BGSET(new) ? SYN_BG(new) : SYN_BG(old);
-	int flg = ((old | new) & SYN_FLG) | (new & SYN_MK);
+	s64 fg = SYN_FGSET(new) ? SYN_FG(new) : SYN_FG(old);
+	s64 bg = SYN_BGSET(new) ? SYN_BG(new) : SYN_BG(old);
+	s64 flg = ((old | new) & SYN_FLG) | (new & SYN_MK);
 	return flg | (bg << 8) | fg;
 }
 
-static int syn_tatt(int *att, int a, int pb)
+static s64 syn_tatt(s64 *att, s64 a, s64 pb)
 {
 	if (SYN_SET(BATT, a) && pb && (!*att || !SYN_SET(BP, blockflg)))
 		att = &blockatt;
 	return (*att & 0xffff) == (a & 0xffff);
 }
 
-void syn_highlight(int *att, char *s, int n)
+void syn_highlight(s64 *att, char *s, s64 n)
 {
-	int fti = ftidx, blockhl = syn_blockhl, blockcont = -1;
+	s64 fti = ftidx, blockhl = syn_blockhl, blockcont = -1;
 	re:;
 	rset *rs = ftmap[fti].rs;
-	int subs[rs->nsubc], *catt, *iatt, sl, c;
-	int cend, sidx = 0, flg = 0, hl, j, i, ii;
+	s64 subs[rs->nsubc], *catt, *iatt, sl, c;
+	s64 cend, sidx = 0, flg = 0, hl, j, i, ii;
 	while ((sl = rset_find(rs, s + sidx, subs, flg)) >= 0) {
 		cend = uc_len(s + sidx);
 		hl = sl + ftmap[fti].setbidx;
 		sl = rs->grpnsubc[sl];
 		catt = hls[hl].att;
 		for (i = 0, ii = i; ii < sl; ii += 2) {
-			int inc = 1;
+			s64 inc = 1;
 			if (subs[ii] < 0 || SYN_SET(IGN, catt[i])) {
 				skip:
 				if (SYN_SET(ATT, catt[i]))
@@ -358,12 +358,12 @@ void syn_highlight(int *att, char *s, int n)
 			cend = MAX(cend, subs[ii + 1]);
 			if (SYN_SET(SKIP, catt[i]))
 				goto skip;
-			int beg = uc_off(s, sidx + subs[ii]);
-			int end = beg + uc_off(s + sidx + subs[ii], subs[ii + 1] - subs[ii]);
+			s64 beg = uc_off(s, sidx + subs[ii]);
+			s64 end = beg + uc_off(s + sidx + subs[ii], subs[ii + 1] - subs[ii]);
 			beg = MIN(beg, n);
 			end = MIN(end, n);
 			if (SYN_SET(ATT, catt[i])) {
-				int pb = blockhl >= 0 && syn_blockhl >= 0;
+				s64 pb = blockhl >= 0 && syn_blockhl >= 0;
 				iatt = &catt[i + 1];
 				c = *iatt;
 				inc += c + 1;
@@ -378,7 +378,7 @@ void syn_highlight(int *att, char *s, int n)
 					break;
 			}
 			if (SYN_SET(OATT, catt[i])) {
-				int pb = blockhl >= 0 && syn_blockhl >= 0;
+				s64 pb = blockhl >= 0 && syn_blockhl >= 0;
 				iatt = &catt[i + inc];
 				inc += *iatt + 1;
 				for (j = beg; j < end; j++) {
@@ -429,14 +429,14 @@ void syn_highlight(int *att, char *s, int n)
 
 char *syn_filetype(char *path)
 {
-	int hl = rset_find(syn_ftrs, path, NULL, 0);
+	s64 hl = rset_find(syn_ftrs, path, NULL, 0);
 	return hl >= 0 && hl < ftslen ? fts[hl].ft : hls[0].ft;
 }
 
-void syn_reloadft(int hl, int flg)
+void syn_reloadft(s64 hl, s64 flg)
 {
 	if (hl >= 0) {
-		int fti = ftidx;
+		s64 fti = ftidx;
 		while (fti < ftmidx - 1 && hl >= ftmap[fti].seteidx)
 			fti++;
 		rset *rs = ftmap[fti].rs;
@@ -448,9 +448,9 @@ void syn_reloadft(int hl, int flg)
 	}
 }
 
-int syn_findhl(int id)
+s64 syn_findhl(s64 id)
 {
-	int i = ftmap[ftidx].setbidx;
+	s64 i = ftmap[ftidx].setbidx;
 	char *name = ftmap[ftidx].ft;
 	for (; i < hlslen && hls[i].ft == name; i++)
 		if (hls[i].id == id)
@@ -458,9 +458,9 @@ int syn_findhl(int id)
 	return -1;
 }
 
-int syn_addhl(char *reg, int id)
+s64 syn_addhl(char *reg, s64 id)
 {
-	int ret = syn_findhl(id);
+	s64 ret = syn_findhl(id);
 	if (ret >= 0)
 		hls[ret].pat = reg;
 	return ret;
@@ -469,7 +469,7 @@ int syn_addhl(char *reg, int id)
 void syn_init(void)
 {
 	char *pats[ftslen];
-	int i = 0;
+	s64 i = 0;
 	for (; i < ftslen; i++)
 		pats[i] = fts[i].pat;
 	syn_ftrs = rset_make(i, pats, 0);

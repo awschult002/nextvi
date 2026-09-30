@@ -3,7 +3,7 @@ static sbuf *acsb;
 static sbuf *compsb;
 static sbuf *extsb;
 
-static int search(const char *pattern, int l)
+static s64 search(const char *pattern, s64 l)
 {
 	if (!*pattern)
 		return 0;
@@ -14,7 +14,7 @@ static int search(const char *pattern, int l)
 		char *part1 = part;
 		while (*part != '\n')
 			part--;
-		int len = dstrlen(++part, '\n');
+		s64 len = dstrlen(++part, '\n');
 		if (len++ != l) {
 			if (part == part1)
 				sbuf_mem(suggestsb, part, len)
@@ -32,21 +32,21 @@ static int search(const char *pattern, int l)
 static void file_index(struct lbuf *buf)
 {
 	char reg[] = "[^\t !-/:-@[-\\]^`{-\x7f]+";
-	int len, sidx, grp = xgrp;
+	s64 len, sidx, grp = xgrp;
 	char **ss = buf->ln;
-	int ln_n = lbuf_len(buf), n;
+	s64 ln_n = lbuf_len(buf), n;
 	rset *rs = rset_smake(xacreg ? xacreg->s : reg,
 		xic ? REG_ICASE | REG_NEWLINE : REG_NEWLINE);
 	if (!rs || grp >= rs->nsubc) {
 		rset_free(rs);
 		return;
 	}
-	int subs[rs->nsubc];
+	s64 subs[rs->nsubc];
 	sbuf_smake(ibuf, 1024)
 	for (n = 1; n <= acsb->s_n; n++)
 		if (acsb->s[n - 1] == '\n')
 			sbuf_mem(ibuf, &n, sizeof(n))
-	for (int i = 0; i < ln_n; i++) {
+	for (s64 i = 0; i < ln_n; i++) {
 		sidx = 0;
 		while (rset_find(rs, ss[i]+sidx, subs, sidx ? REG_NOTBOL : 0) >= 0) {
 			/* if target group not found, continue with group 1
@@ -58,8 +58,8 @@ static void file_index(struct lbuf *buf)
 			len = subs[grp + 1] - subs[grp];
 			if (len > 1) {
 				char *part = ss[i]+sidx+subs[grp];
-				int *ip = (int*)(ibuf->s+sizeof(n));
-				for (n = len+1; ip < (int*)&ibuf->s[ibuf->s_n]; ip++)
+				s64 *ip = (s64*)(ibuf->s+sizeof(n));
+				for (n = len+1; ip < (s64*)&ibuf->s[ibuf->s_n]; ip++)
 					if (*ip - ip[-1] == n &&
 						!memcmp(acsb->s + ip[-1], part, len))
 							goto skip;
@@ -76,7 +76,7 @@ static void file_index(struct lbuf *buf)
 	rset_free(rs);
 }
 
-static char *kmap_map(int kmap, int c)
+static char *kmap_map(s64 kmap, s64 c)
 {
 	static char cs[4];
 	char **keymap = conf_kmap(kmap);
@@ -85,7 +85,7 @@ static char *kmap_map(int kmap, int c)
 }
 
 /* map cursor horizontal position to terminal column number */
-int led_pos(char *s, int pos)
+s64 led_pos(char *s, s64 pos)
 {
 	if (dir_context(s) < 0)
 		return xleft + xcols - pos - 1;
@@ -93,11 +93,11 @@ int led_pos(char *s, int pos)
 }
 
 /* map a character offset in x->s0 to its x->att index; -1 if not visible */
-int led_attidx(led_ctx *x, int off)
+s64 led_attidx(led_ctx *x, s64 off)
 {
-	int i, l, j;
+	s64 i, l, j;
 	if (!x->bound)
-		return (unsigned int)off < (unsigned int)x->alen ? off : -1;
+		return (u64)off < (u64)x->alen ? off : -1;
 	if (!x->alen || x->stt[0] > off || x->stt[x->alen-1] < off)
 		return -1;
 	i = off - x->stt[0];
@@ -119,18 +119,18 @@ static void ext_attmerge(led_ext *p, led_ctx *x)
 {
 	if (!led_extkey(p, x))
 		return;
-	int *ola = p->usr;
-	for (int t = 0; t < p->blen / (int)sizeof(int); t += 3) {
-		int o = ola[t], end = o + ola[t+1];
+	s64 *ola = p->usr;
+	for (s64 t = 0; t < p->blen / (s64)sizeof(s64); t += 3) {
+		s64 o = ola[t], end = o + ola[t+1];
 		for (; o < end; o++) {
-			int i = led_attidx(x, o);
+			s64 i = led_attidx(x, o);
 			if (i >= 0)
 				x->att[i] = syn_merge(x->att[i], ola[t+2]);
 		}
 	}
 }
 
-static int extregn;	/* registered extension tracker */
+static s64 extregn;	/* registered extension tracker */
 
 static led_ext *led_extpush(void)
 {
@@ -166,7 +166,7 @@ led_ext *led_extfind(void (*ext_func)(led_ext *p, led_ctx *x))
 {
 	if (!extsb)
 		return NULL;
-	for (int i = 0; i < extsb->s_n; i += sizeof(led_ext)) {
+	for (s64 i = 0; i < extsb->s_n; i += sizeof(led_ext)) {
 		led_ext *p = (led_ext*)&extsb->s[i];
 		if (p->ext_func == ext_func)
 			return p;
@@ -207,7 +207,7 @@ else if (*chrs[o] == '\t') \
 #define led_out(out, n) \
 { \
 for (i = 0; i < cterm;) { \
-	int att_new = 0; \
+	s64 att_new = 0; \
 	o = off[i]; \
 	if (o >= 0) { \
 		for (l = i; off[i] == o; i++); \
@@ -236,20 +236,20 @@ for (i = 0; i < cterm;) { \
 } } \
 
 /* render and highlight a line */
-void led_render(char *s0, int cbeg, int cend)
+void led_render(char *s0, s64 cbeg, s64 cend)
 {
 	if (!xled)
 		return;
 	ren_state *r = ren_position(s0);
-	int j, c, l, i, o, n = r->n;
-	int att_old = 0, atti = 0, cterm = cend - cbeg;
+	s64 j, c, l, i, o, n = r->n;
+	s64 att_old = 0, atti = 0, cterm = cend - cbeg;
 	char *bound = NULL;
 	char **chrs = r->chrs;	/* chrs[i]: the i-th character in s0 */
-	int off[cterm+1];	/* off[i]: the character at screen position i */
-	int att[cterm+1];	/* att[i]: the attributes of i-th character */
-	int stt[cterm+1];	/* stt[i]: remap off indexes */
-	int ctt[cterm+1];	/* ctt[i]: cterm bound attrs */
-	int ctx = r->ctx;
+	s64 off[cterm+1];	/* off[i]: the character at screen position i */
+	s64 att[cterm+1];	/* att[i]: the attributes of i-th character */
+	s64 stt[cterm+1];	/* stt[i]: remap off indexes */
+	s64 ctt[cterm+1];	/* ctt[i]: cterm bound attrs */
+	s64 ctx = r->ctx;
 	off[cterm] = -1;
 	if (ctx < 0) {
 		o = cbeg;
@@ -278,7 +278,7 @@ void led_render(char *s0, int cbeg, int cend)
 		}
 		stt[0] = 0;
 		for (i = 1; i < c; i++) {
-			int key0 = att[i];
+			s64 key0 = att[i];
 			j = i - 1;
 			while (j >= 0 && att[j] > key0) {
 				att[j + 1] = att[j];
@@ -330,7 +330,7 @@ void led_render(char *s0, int cbeg, int cend)
 	}
 }
 
-static int led_lastchar(char *s)
+static s64 led_lastchar(char *s)
 {
 	char *r = *s ? strchr(s, '\0') : s;
 	if (r != s)
@@ -338,18 +338,18 @@ static int led_lastchar(char *s)
 	return r - s;
 }
 
-static int led_preview_ps;
-static void led_preview_draw(int ps);
+static s64 led_preview_ps;
+static void led_preview_draw(s64 ps);
 
-int led_row = -1;		/* terminal row of the edited line, -1 = relative */
-static int led_lw;		/* the edited line is drawn wrapped at absolute rows */
-static int led_rowh = 1;	/* the rows the edited line occupies */
-static int led_nextb;		/* the buffer line drawn below the edited line */
+s64 led_row = -1;		/* terminal row of the edited line, -1 = relative */
+static s64 led_lw;		/* the edited line is drawn wrapped at absolute rows */
+static s64 led_rowh = 1;	/* the rows the edited line occupies */
+static s64 led_nextb;		/* the buffer line drawn below the edited line */
 
-static int led_lastword(char *s)
+static s64 led_lastword(char *s)
 {
 	char *r = *s ? uc_beg(s, strchr(s, '\0') - 1) : s;
-	int kind;
+	s64 kind;
 	while (r > s && uc_isspace(*r))
 		r = uc_beg(s, r - 1);
 	kind = r > s ? uc_kind(r) : 0;
@@ -360,13 +360,13 @@ static int led_lastword(char *s)
 
 /* complete the path at the end of sb, lst gets the matches, typed gets the
 length of the part already there; returns the count of the matches */
-static int led_pathcomp(sbuf *sb, int pre, sbuf *lst, int *typed)
+static s64 led_pathcomp(sbuf *sb, s64 pre, sbuf *lst, s64 *typed)
 {
 	DIR *dp;
 	struct dirent *dirp;
 	struct stat st;
 	char *base;
-	int i, n = 0, wo, bo, blen, mlen = 0;
+	s64 i, n = 0, wo, bo, blen, mlen = 0;
 	sbuf_smake(path, 128)
 	for (wo = sb->s_n; wo > pre; wo--)
 		if (sb->s[wo-1] == ' ' || sb->s[wo-1] == '\t')
@@ -416,11 +416,11 @@ static int led_pathcomp(sbuf *sb, int pre, sbuf *lst, int *typed)
 
 /* clear the screen and list lst from column beg, below the top row,
 wrapped at word boundaries; returns the first column left out */
-static int led_complist(sbuf *lst, int beg)
+static s64 led_complist(sbuf *lst, s64 beg)
 {
 	ren_state *rp;
-	int i, r, end, tot;
-	preserve(int, xhl, xhl = 0;)
+	s64 i, r, end, tot;
+	preserve(s64, xhl, xhl = 0;)
 	term_clean();
 	rstate = rstates+2;
 	rstate->s = NULL;
@@ -445,15 +445,15 @@ static int led_complist(sbuf *lst, int beg)
 	return beg < tot ? beg : 0;
 }
 
-static void led_printparts(sbuf *sb, int pre, int ps,
-	char *post, int postn, int *poff)
+static void led_printparts(sbuf *sb, s64 pre, s64 ps,
+	char *post, s64 postn, s64 *poff)
 {
 	if (!xled) {
 		sbuf_nul4(sb)
 		return;
 	}
-	int dir, off, pos, psn = sb->s_n;
-	int lncol = poff == &xoff ? vi_lncol : 0;
+	s64 dir, off, pos, psn = sb->s_n;
+	s64 lncol = poff == &xoff ? vi_lncol : 0;
 	sbuf_str(sb, post)
 	sbuf_nul4(sb)
 	if (ts_preview && poff == &xoff) {
@@ -470,15 +470,15 @@ static void led_printparts(sbuf *sb, int pre, int ps,
 	*poff = off;
 	pos = ren_cursor(r->s, r->pos[MAX(0, off-1)]);
 	if (off > 0) {
-		int two = off > 1 && psn != pre;
+		s64 two = off > 1 && psn != pre;
 		dir = r->pos[off-two] - r->pos[off-(two+1)];
-		if (abs(dir) > r->wid[off-(two+1)])
+		if (labs(dir) > r->wid[off-(two+1)])
 			pos = ren_cursor(r->s, r->pos[off-two]);
 		pos += dir < 0 ? -1 : 1;
 	}
 	syn_scdir(0);
 	if (led_lw) {
-		int w = ren_wrapw(lncol), k, trow, b;
+		s64 w = ren_wrapw(lncol), k, trow, b;
 		xleft = 0;
 		led_rowh = MAX(MAX(0, r->cmax), pos) / w + 1;
 		k = led_row + pos / w - xrows + 1;
@@ -527,10 +527,10 @@ static void led_printparts(sbuf *sb, int pre, int ps,
 }
 
 /* read a character from the terminal */
-char *led_read(int *kmap, int c)
+char *led_read(s64 *kmap, s64 c)
 {
 	static char buf[5];
-	int c1, c2, i, n;
+	s64 c1, c2, i, n;
 	while (!TK_INT(c)) {
 		switch (c) {
 		case TK_CTL('f'):
@@ -569,7 +569,7 @@ char *led_read(int *kmap, int c)
 
 #define _led_info(buf, pn) \
 { \
-	int ola[3]; \
+	s64 ola[3]; \
 	led_ext *la; \
 	ola[0] = *poff; \
 	ola[1] = uc_slen(buf); \
@@ -587,14 +587,14 @@ char *led_read(int *kmap, int c)
 } \
 
 /* redraw the buffer rows above the edited line */
-static void led_redrawlw(int ctop, int crow)
+static void led_redrawlw(s64 ctop, s64 crow)
 {
 	if (ts_preview) {
 		led_preview_draw(led_preview_ps);
 		return;
 	}
 	preserve(ren_state*, rstate, rstate = rstates;)
-	for (int i = ctop, trow = vi_srow(ctop); trow < xrows && i < crow; i++)
+	for (s64 i = ctop, trow = vi_srow(ctop); trow < xrows && i < crow; i++)
 		trow += vi_drawline(i, trow);
 	restore(rstate)
 }
@@ -603,14 +603,14 @@ static void led_redrawlw(int ctop, int crow)
 /* like led_info(), except the cursor is left where it was, in front of buf */
 #define led_infoc(buf) _led_info(buf, postn + uc_slen(buf))
 
-static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
+static void led_redraw(char *cs, s64 r, s64 orow, s64 crow, s64 ctop, s64 flg)
 {
 	if (ts_preview) {
 		led_preview_draw(led_preview_ps);
 		return;
 	}
 	rstate++;
-	for (int nl = 0; r < xrows; r++) {
+	for (s64 nl = 0; r < xrows; r++) {
 		if (vi_lncol) {
 			term_pos(r, 0);
 			term_kill();
@@ -638,10 +638,10 @@ static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 void led_modeswap(void)
 {
 	preserve(struct ts_state*, ts_preview, ts_preview = NULL;)
-	preserve(int, xquit, xquit = 0;)
-	preserve(int, texec, texec = 0;)
-	preserve(int, xvis, xvis ^= 2;)
-	preserve(int, xexec_dep, xexec_dep = 0;)
+	preserve(s64, xquit, xquit = 0;)
+	preserve(s64, texec, texec = 0;)
+	preserve(s64, xvis, xvis ^= 2;)
+	preserve(s64, xexec_dep, xexec_dep = 0;)
 	if (xvis & 2)
 		ex();
 	else {
@@ -659,11 +659,11 @@ void led_modeswap(void)
 }
 
 /* read a line from the terminal */
-static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **postref,
-	int ai_max, int *poff, int *kmap, ins_state *is, int orow, int crow, int ctop, int flg)
+static s64 led_line(sbuf *sb, s64 pre, s64 ps, char **post, s64 postn, char **postref,
+	s64 ai_max, s64 *poff, s64 *kmap, ins_state *is, s64 orow, s64 crow, s64 ctop, s64 flg)
 {
 	char *cs;
-	int len, c, i;
+	s64 len, c, i;
 	sbuf *reg;
 	do {
 		led_printparts(sb, pre, ps, *post, postn, poff);
@@ -694,7 +694,7 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			cs = sdup(sb->s + ps, sb->s_n - ps);
 			sbuf_cut(sb, ps)
 			if (xet)
-				for (int _k = 0; _k < xsw; _k++)
+				for (s64 _k = 0; _k < xsw; _k++)
 					sbuf_chr(sb, ' ')
 			else
 				sbuf_chr(sb, '\t')
@@ -704,7 +704,7 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			break;
 		case TK_CTL('d'):
 			if (xet) {
-				int _k;
+				s64 _k;
 				for (_k = 0; _k < xsw && sb->s[ps + _k] == ' '; _k++);
 				if (_k) {
 					memmove(&sb->s[ps], &sb->s[ps + _k], len - ps - _k);
@@ -811,17 +811,17 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 				if (led_lw)	/* the block has no wrapped form */
 					continue;
 				sbuf_nul(sb)
-				int r = crow-ctop+1;
+				s64 r = crow-ctop+1;
 				if (is->sug)
 					goto pac_;
 				i = is->sug_pt >= 0 ? is->sug_pt : led_lastword(sb->s + pre) + pre;
 				if (suggestsb && search(sb->s + i, sb->s_n - i)) {
 					is->sug = suggestsb->s;
 					pac_:;
-					preserve(int, xtd, xtd = 2;)
-					preserve(int, ftidx,)
+					preserve(s64, xtd, xtd = 2;)
+					preserve(s64, ftidx,)
 					syn_setft(ac_ft);
-					for (int left = 0; r < xrows; r++) {
+					for (s64 left = 0; r < xrows; r++) {
 						RST(2, led_crender(is->sug, r, 0, left, left+xcols))
 						left += xcols;
 						if (left >= rstates[2].pos[rstates[2].n])
@@ -837,15 +837,15 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			temp_pos(0, -1, 0, 0);
 			temp_write(0, sb->s + pre);
 			preserve(struct buf*, ex_buf,)
-			int bidx = istempbuf(ex_buf) ? -1 : ex_buf - bufs;
-			int pidx = ex_pbuf - bufs;
-			preserve(int, texec, texec = 0;)
-			preserve(int, xquit, xquit = 0;)
-			preserve(int, ftidx,)
-			preserve(int, xexec_dep, if (flg & LED_AGENT) xexec_dep = 0;)
-			preserve(int, xvis, if (flg & LED_AGENT) xvis &= ~2;)
-			preserve(int, xmpt, if (flg & LED_AGENT) xmpt = 0;)
-			preserve(int, xpln, if (flg & LED_AGENT) xpln = 0;)
+			s64 bidx = istempbuf(ex_buf) ? -1 : ex_buf - bufs;
+			s64 pidx = ex_pbuf - bufs;
+			preserve(s64, texec, texec = 0;)
+			preserve(s64, xquit, xquit = 0;)
+			preserve(s64, ftidx,)
+			preserve(s64, xexec_dep, if (flg & LED_AGENT) xexec_dep = 0;)
+			preserve(s64, xvis, if (flg & LED_AGENT) xvis &= ~2;)
+			preserve(s64, xmpt, if (flg & LED_AGENT) xmpt = 0;)
+			preserve(s64, xpln, if (flg & LED_AGENT) xpln = 0;)
 			preserve(struct ts_state*, ts_preview, ts_preview = NULL;)
 			temp_switch(0, 0);
 			vi(1);
@@ -897,8 +897,8 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			if (!*postref)
 				*postref = *post = sdup(*post, strlen(*post));
 			preserve(struct buf*, ex_buf,)
-			int bidx = istempbuf(ex_buf) ? -1 : ex_buf - bufs;
-			preserve(int, ftidx,)
+			s64 bidx = istempbuf(ex_buf) ? -1 : ex_buf - bufs;
+			preserve(s64, ftidx,)
 			led_modeswap();
 			restore(ftidx)
 			if (bidx < 0) {
@@ -916,13 +916,13 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			if (flg & 2)    /* the caller steps the search match */
 				break;
 			if (xtc && ai_max < 0 && sb->s[ps] == ':') {
-				int typed, full = c == TK_CTL('_') || xtc > 1;
+				s64 typed, full = c == TK_CTL('_') || xtc > 1;
 				if (!compsb)
 					sbuf_make(compsb, 128)
 				sbuf_cut(compsb, 0)
 				i = led_pathcomp(sb, pre, compsb, &typed);
 				if (i > 1 && sb->s_n == len) {
-					int page = 0;
+					s64 page = 0;
 					if (!full)
 						led_infoc(compsb->s + typed)
 					do {
@@ -944,7 +944,7 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			if (c == '\n' || TK_INT(c))
 				return c;
 			if (c == '\t' && xet) {
-				for (int _l = 0; _l < xsw; _l++)
+				for (s64 _l = 0; _l < xsw; _l++)
 					sbuf_chr(sb, ' ')
 			} else if ((cs = led_read(kmap, c)))
 				sbuf_str(sb, cs)
@@ -957,9 +957,9 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 	return c;
 }
 
-int led_prompt(sbuf *sb, char *insert, int *kmap, ins_state *is, int ps, int flg)
+s64 led_prompt(sbuf *sb, char *insert, s64 *kmap, ins_state *is, s64 ps, s64 flg)
 {
-	int n, key, off;
+	s64 n, key, off;
 	char *post = "", *postref = post;
 	ins_state _is;
 	if (flg & 2) {
@@ -973,10 +973,10 @@ int led_prompt(sbuf *sb, char *insert, int *kmap, ins_state *is, int ps, int flg
 		ins_init(_is)
 		is = &_is;
 	}
-	preserve(int, xleft, xleft = 0;)
-	preserve(int, xtd, xtd = 2;)
-	preserve(int, led_row, led_row = -1;)
-	preserve(int, led_lw, led_lw = 0;)
+	preserve(s64, xleft, xleft = 0;)
+	preserve(s64, xtd, xtd = 2;)
+	preserve(s64, led_row, led_row = -1;)
+	preserve(s64, led_lw, led_lw = 0;)
 	key = led_line(sb, n, ps, &post, 0, &postref, -1,
 			&off, kmap, is, 0, xrow, xtop, flg);
 	restore(led_lw)
@@ -991,13 +991,13 @@ int led_prompt(sbuf *sb, char *insert, int *kmap, ins_state *is, int ps, int flg
 	return key;
 }
 
-int led_input(sbuf *sb, char *post, int postn, int row, int flg, int *pren,
-	int source_beg, int source_end)
+s64 led_input(sbuf *sb, char *post, s64 postn, s64 row, s64 flg, s64 *pren,
+	s64 source_beg, s64 source_end)
 {
 	preserve(struct ts_state*, ts_preview,
 		ts_preview = ts_preview_begin(xb, source_beg, source_end);)
-	int ai_max = 128 * xai;
-	int n, key, ps = 0, crow = xrow, ctop = xtop;
+	s64 ai_max = 128 * xai;
+	s64 n, key, ps = 0, crow = xrow, ctop = xtop;
 	char *postref = NULL;
 	ins_state is;
 	led_nextb = row + 1 - !!(flg & 4);
@@ -1041,7 +1041,7 @@ int led_input(sbuf *sb, char *post, int postn, int row, int flg, int *pren,
 		if (ai_max > 0) {	/* updating autoindent */
 			for (; *post == ' ' || *post == '\t'; postn--)
 				++post;
-			int ai_new = n;
+			s64 ai_new = n;
 			while (sb->s[ai_new] == ' ' || sb->s[ai_new] == '\t')
 				ai_new++;
 			ai_new = ai_max > ai_new - n ? ai_new - n : ai_max;

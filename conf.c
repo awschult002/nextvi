@@ -9,19 +9,19 @@ static char *log_dir;
 static char *api_key = "local";
 static char *endpoint = "http://127.0.0.1:8080/v1/chat/completions";
 static char *request_extra = "{}";
-static int request_timeout = 5000;
+static s64 request_timeout = 5000;
 #elif OPENROUTER == 1
 static char *api_key = "YOUR_OPENROUTER_API_KEY";
 static char *endpoint = "https://openrouter.ai/api/v1/chat/completions";
 static char *request_extra = "{\"model\":\"PROVIDER/MODEL_ID\"}";
-static int request_timeout = 500;
+static s64 request_timeout = 500;
 #endif
 
-static int max_tool_rounds = 300;
-int xgr = 2;	/* agent guardrails: anything but 2 = disabled */
-int xar;	/* display returned agent reasoning (:ar) */
-int xaco;	/* autocompact input-token threshold; 0 disables */
-static int xaco_browse;	/* last selected mode: aco! rather than aco */
+static s64 max_tool_rounds = 300;
+s64 xgr = 2;	/* agent guardrails: anything but 2 = disabled */
+s64 xar;	/* display returned agent reasoning (:ar) */
+s64 xaco;	/* autocompact input-token threshold; 0 disables */
+static s64 xaco_browse;	/* last selected mode: aco! rather than aco */
 
 static char exspec_insert[] =
 	"Ex special characters are disabled and raw ex mode is on by default.\n"
@@ -48,7 +48,7 @@ static struct {
 };
 
 /* access mode of new files */
-const int conf_mode = 0600;
+const s64 conf_mode = 0600;
 
 /* the speller of the sl command, must speak the ispell pipe protocol */
 char spell_cmd[] = "aspell -a";
@@ -96,7 +96,7 @@ struct filetype fts[] = {
 	{msg_ft, NULL},
 	{lsp_ft, NULL}
 };
-const int ftslen = LEN(fts);
+const s64 ftslen = LEN(fts);
 
 /* aspell's context filter, checking only "#" comments; the stock comment
  * mode is the inverse, it hides comments and checks the code */
@@ -119,7 +119,7 @@ struct spellft spell_fts[] = {
 	{FT(html), "--mode=html"},
 	{FT(md), "--mode=markdown"}
 };
-const int spell_ftslen = LEN(spell_fts);
+const s64 spell_ftslen = LEN(spell_fts);
 
 #define NA	0	/* no attribute */
 #define RE	1	/* red */
@@ -138,7 +138,7 @@ const int spell_ftslen = LEN(spell_fts);
 #define CY1	14	/* bright cyan */
 #define WH1	15	/* bright white */
 
-#define A(...) (int[]){__VA_ARGS__}
+#define A(...) (s64 []){__VA_ARGS__}
 /* att of the misspelled words, used by sl; set 9 is theirs alone, an earlier
  * filetype rule on the line, a comment or a heading, never swallows them */
 #define SP	A(SYN_BGMK(RE1) | SYN_OWR)
@@ -420,20 +420,20 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
 	{lsp_ft, "^.*warning.*$", A(YE1 | SYN_IT)},
 	{lsp_ft, "^.*$", A(BL1 | SYN_IT)},
 };
-const int hlslen = LEN(hls);
+const s64 hlslen = LEN(hls);
 
 /* ids of optional hls, reset and reloaded on filetype change */
-const int hlopts[] = {1, 2, 5};
-const int hloptslen = LEN(hlopts);
+const s64 hlopts[] = {1, 2, 5};
+const s64 hloptslen = LEN(hlopts);
 
 /* how to highlight text in the reverse direction */
-const int conf_hlrev = SYN_BGMK(8);
+const s64 conf_hlrev = SYN_BGMK(8);
 
 /* how to highlight the search matches */
-const int conf_hlmat = RE1;
+const s64 conf_hlmat = RE1;
 
 /* how to highlight the search match the cursor lands on */
-const int conf_hlmatc = RE1 | SYN_BGMK(8);
+const s64 conf_hlmatc = RE1 | SYN_BGMK(8);
 
 /* right-to-left characters */
 #define CR2L		"ء-يپچژکگی‌-‍؛،»«؟ً-ْٔ"
@@ -444,38 +444,38 @@ struct dircontext dctxs[] = {
 	{"^[" CR2L "]", -1},
 	{"^[a-zA-Z_0-9]", +1},
 };
-const int dctxlen = LEN(dctxs);
+const s64 dctxlen = LEN(dctxs);
 
 struct dirmark dmarks[] = {
 	{"[" CR2L "][" CNEUT CR2L "]*[" CR2L "]", +1, {-1}},
 	{"^([ \t]+)?([" CNEUT "]*[^" CR2L "]*[^" CR2L CNEUT "](?:[" CNEUT "]+$)?)", -1, {0, 1, -1}},
 	{"[^" CR2L CNEUT "][^" CR2L "]*[^" CR2L CNEUT "](?:[" CNEUT "]+$)?", -1, {-1}},
 };
-const int dmarkslen = LEN(dmarks);
+const s64 dmarkslen = LEN(dmarks);
 
 struct placeholder _ph[2] = {
 	{{0x0,0x1f}, "^", 1, 1},
 	{{0x200c,0x200d}, "-", 1, 3},
 };
 struct placeholder *ph = _ph;
-int phlen = LEN(_ph);
+s64 phlen = LEN(_ph);
 
-char **conf_kmap(int id)
+char **conf_kmap(s64 id)
 {
 	return kmaps[id];
 }
 
-int conf_kmapfind(char *name)
+s64 conf_kmapfind(char *name)
 {
-	for (int i = 0; i < LEN(kmaps); i++)
+	for (s64 i = 0; i < LEN(kmaps); i++)
 		if (name && kmaps[i][0] && !strcmp(name, kmaps[i][0]))
 			return i;
 	return 0;
 }
 
-char *conf_digraph(int c1, int c2)
+char *conf_digraph(s64 c1, s64 c2)
 {
-	for (int i = 0; i < LEN(digraphs); i++)
+	for (s64 i = 0; i < LEN(digraphs); i++)
 		if (digraphs[i][0][0] == c1 && digraphs[i][0][1] == c2)
 			return digraphs[i][1];
 	return NULL;
@@ -511,7 +511,7 @@ static const struct {
 };
 static const struct {
 	const char *name;
-	int att;
+	s64 att;
 } ts_attributes[] = {
 	{"type", GR1}, {"keyword", YE1}, {"operator", RE},
 	{"function", SYN_BD}, {"preprocessor", CY}, {"number", RE1},

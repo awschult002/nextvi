@@ -299,10 +299,10 @@ static char *exspec_lines[] = {
 	"literal.",
 	"",
 	"Example: substitution backreference",
-	"this is an example text for subs and has int or void",
-	"%s/(int)|(void)/pre\\0after",
+	"this is an example text for subs and has s64 or void",
+	"%s/(s64)|(void)/pre\\0after",
 	"this is an example text for subs and has preintafter or void",
-	"%s/(int)|(void)/pre\\2after/g",
+	"%s/(s64)|(void)/pre\\2after/g",
 	"this is an example text for subs and has prepreafterafter or prevoidafter",
 	"",
 	"Example: global replacement with <g>",
@@ -530,7 +530,7 @@ static char *exspec_lines[] = {
 	"Example: switch to the /sc/ scratch buffer",
 	"b-3",
 	"Example: clear history and return to previous (#) main buffer",
-	"b-1:%d:b-1",
+	"b-1:%ld:b-1",
 	"",
 	"bp[path]",
 	"Set current buffer path",
@@ -691,7 +691,7 @@ static char *exspec_lines[] = {
 	"Inverted conditional",
 	"",
 	"Example: inverted capture",
-	"f>int:1\?\?!:1\?\?p int was absent",
+	"f>int:1\?\?!:1\?\?p s64 was absent",
 	"",
 	"{prefix}\?\?\?",
 	"Evaluate capture ids",
@@ -1137,7 +1137,7 @@ static char *exspec_lines[] = {
 };
 static struct {
 	char *name, *desc;
-	int begin, end, option, read;
+	s64 begin, end, option, read;
 } exspec_cmds[] = {
 	{"f>", "Ranged search", 131, 146, 0, 0},
 	{"f<", "Ranged search", 131, 146, 0, 0},
