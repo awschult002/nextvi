@@ -10,25 +10,25 @@ struct pollfd term_ufd = {STDIN_FILENO, POLLIN};	///< input (stdin) descriptor f
 sbuf *term_sbuf;	///< output buffer; NULL until the first term_init() (term_done() frees it but does not reset it)
 int term_record;	///< if set, output goes to term_sbuf until term_commit()
 int term_winch;	///< SIGWINCH count; reset by term_init()
-int term_resized;	///< incremented by every term_init(); vi.c compares it to vi_status to take the status row out of xrows again
-int xrows, xcols;	///< terminal size in rows/columns: TIOCGWINSZ, else $LINES/$COLUMNS, default 25x80 (vi.c subtracts the status row from xrows)
-/* tibuf_pos: index of the next byte to read from tibuf;
- * tibuf_cnt: number of valid bytes in tibuf;
- * tibuf_sz: allocated size of tibuf (term_push() resizes it);
- * ticmd_pos: number of bytes in ticmd. */
-unsigned int tibuf_pos, tibuf_cnt, tibuf_sz = 128, ticmd_pos;
-/* tibuf: pending input queue (pushed keys, or the last byte read from the
+int term_resized;	///< incremented by every term_init(); vi.c compares it to vi_status to take the status row out of term_rows again
+int term_rows, term_cols;	///< terminal size in rows/columns: TIOCGWINSZ, else $LINES/$COLUMNS, default 25x80 (vi.c subtracts the status row from term_rows)
+/* term_inbuf_pos: index of the next byte to read from term_inbuf;
+ * term_inbuf_count: number of valid bytes in term_inbuf;
+ * term_inbuf_size: allocated size of term_inbuf (term_push() resizes it);
+ * term_cmd_keys_pos: number of bytes in term_cmd_keys. */
+unsigned int term_inbuf_pos, term_inbuf_count, term_inbuf_size = 128, term_cmd_keys_pos;
+/* term_inbuf: pending input queue (pushed keys, or the last byte read from the
  *        terminal); term_read() returns from it first.
- * ticmd: every byte returned by term_read() since vi.c last reset
- *        ticmd_pos (once per normal-mode command); saved for '.' repeat. */
-unsigned char *tibuf, ticmd[4096];
-/* texec: type of the running term_exec() ('@' macro or '&' ex), 0 if none;
+ * term_cmd_keys: every byte returned by term_read() since vi.c last reset
+ *        term_cmd_keys_pos (once per normal-mode command); saved for '.' repeat. */
+unsigned char *term_inbuf, term_cmd_keys[4096];
+/* term_exec_type: type of the running term_exec() ('@' macro or '&' ex), 0 if none;
  *        when its input runs out, term_read() sets quit_state to leave the
  *        nested vi() ('&' also returns 0 instead of reading the terminal).
- * texec_n: bytes term_push() inserted at the read position during
+ * term_exec_pushed: bytes term_push() inserted at the read position during
  *        term_exec(); later pushes go after them, so they are read in push
  *        order before the rest of the queue. */
-unsigned int texec, texec_n;
+unsigned int term_exec_type, term_exec_pushed;
 
 /** @brief Enter raw mode (no ICANON, ISIG, ECHO) and read the terminal size. */
 void term_init(void)
@@ -44,16 +44,16 @@ void term_init(void)
 	newtermios.c_lflag &= ~(ICANON | ISIG | ECHO);
 	tcsetattr(term_ufd.fd, TCSAFLUSH, &newtermios);
 	if (!ioctl(term_ufd.fd, TIOCGWINSZ, &win)) {
-		xcols = win.ws_col;
-		xrows = win.ws_row;
+		term_cols = win.ws_col;
+		term_rows = win.ws_row;
 	} else {
 		if ((s = getenv("LINES")))
-			xrows = atoi(s);
+			term_rows = atoi(s);
 		if ((s = getenv("COLUMNS")))
-			xcols = atoi(s);
+			term_cols = atoi(s);
 	}
-	xcols = xcols ? xcols : 80;
-	xrows = xrows ? xrows : 25;
+	term_cols = term_cols ? term_cols : 80;
+	term_rows = term_rows ? term_rows : 25;
 }
 
 /** @brief Flush output, free term_sbuf and restore the terminal attributes. */
@@ -151,81 +151,81 @@ void term_pos(int r, int c)
 /**
  * @brief Queue n bytes of s to be read before reading from the terminal.
  * Appended to the queue normally; inside term_exec() inserted at the read
- * position (after earlier pushes of the same position, see texec_n).
+ * position (after earlier pushes of the same position, see term_exec_pushed).
  */
 void term_push(char *s, unsigned int n)
 {
-	static unsigned int tibuf_prev;	///< tibuf_pos at the previous push during term_exec(); if it moved, texec_n restarts
+	static unsigned int term_inbuf_prev;	///< term_inbuf_pos at the previous push during term_exec(); if it moved, term_exec_pushed restarts
 	/* grow if full, shrink if more than 128 bytes would be spare */
-	if (tibuf_cnt + n >= tibuf_sz || tibuf_sz - (tibuf_cnt + n) > 128) {
-		tibuf_sz = tibuf_cnt + n + 128;
-		tibuf = erealloc(tibuf, tibuf_sz);
+	if (term_inbuf_count + n >= term_inbuf_size || term_inbuf_size - (term_inbuf_count + n) > 128) {
+		term_inbuf_size = term_inbuf_count + n + 128;
+		term_inbuf = erealloc(term_inbuf, term_inbuf_size);
 	}
-	if (texec) {
-		if (texec == '@' && quit_state > 0) {
+	if (term_exec_type) {
+		if (term_exec_type == '@' && quit_state > 0) {
 			quit_state = 0;
-			texec_n = 0;
-		} else if (tibuf_prev != tibuf_pos)
-			texec_n = 0;
-		/* open an n byte gap after the texec_n bytes already pushed here */
-		memmove(tibuf + tibuf_pos + n + texec_n,
-			tibuf + tibuf_pos + texec_n,
-			tibuf_cnt - tibuf_pos - texec_n);
-		memcpy(tibuf + tibuf_pos + texec_n, s, n);
-		texec_n += n;
-		tibuf_prev = tibuf_pos;
+			term_exec_pushed = 0;
+		} else if (term_inbuf_prev != term_inbuf_pos)
+			term_exec_pushed = 0;
+		/* open an n byte gap after the term_exec_pushed bytes already pushed here */
+		memmove(term_inbuf + term_inbuf_pos + n + term_exec_pushed,
+			term_inbuf + term_inbuf_pos + term_exec_pushed,
+			term_inbuf_count - term_inbuf_pos - term_exec_pushed);
+		memcpy(term_inbuf + term_inbuf_pos + term_exec_pushed, s, n);
+		term_exec_pushed += n;
+		term_inbuf_prev = term_inbuf_pos;
 	} else
-		memcpy(tibuf + tibuf_cnt, s, n);
-	tibuf_cnt += n;
+		memcpy(term_inbuf + term_inbuf_count, s, n);
+	term_inbuf_count += n;
 }
 
 /**
- * @brief Return the next input byte: from tibuf, else from the terminal.
+ * @brief Return the next input byte: from term_inbuf, else from the terminal.
  * @param winch  if nonzero, returned as the key when the window was resized
  * @return the byte, or 0 on EOF/error (or when a '&' term_exec runs out)
  * Terminal bytes are also appended to register opt_record_reg if set; every
- * returned byte is logged in ticmd.
+ * returned byte is logged in term_cmd_keys.
  */
 int term_read(int winch)
 {
 	int cw;
-	if (tibuf_pos >= tibuf_cnt) {
-		if (texec) {
+	if (term_inbuf_pos >= term_inbuf_count) {
+		if (term_exec_type) {
 			quit_state = !quit_state ? 1 : quit_state;
-			if (texec == '&')
+			if (term_exec_type == '&')
 				goto err;
 		}
 		if (term_winch && winch) {
-			*tibuf = winch;	/* yield until term_winch is cleared */
+			*term_inbuf = winch;	/* yield until term_winch is cleared */
 			goto ret;
 		}
 		cw = 0;
 		re:
 		/* read a single input character */
 		if (quit_state < 0 || poll(&term_ufd, 1, -1) <= 0 ||
-				read(term_ufd.fd, tibuf, 1) <= 0) {
+				read(term_ufd.fd, term_inbuf, 1) <= 0) {
 			quit_state = !isatty(term_ufd.fd) ? -1 : quit_state;
 			if (term_winch && winch && quit_state >= 0) {
-				*tibuf = winch;
+				*term_inbuf = winch;
 				goto ret;
 			} else if (term_winch != cw && !winch && quit_state >= 0) {
 				cw = term_winch;
 				goto re;
 			}
 			err:
-			*tibuf = 0;
+			*term_inbuf = 0;
 		} else if (opt_record_reg > 0) {
 			static char buf[2];
-			buf[0] = *tibuf;
+			buf[0] = *term_inbuf;
 			ex_regput(opt_record_reg, buf, 1);
 		}
 		ret:
-		tibuf_cnt = 1;
-		tibuf_pos = 0;
+		term_inbuf_count = 1;
+		term_inbuf_pos = 0;
 	}
-	if (ticmd_pos < sizeof(ticmd))
-		ticmd[ticmd_pos++] = tibuf[tibuf_pos];
-	return tibuf[tibuf_pos++];
+	if (term_cmd_keys_pos < sizeof(term_cmd_keys))
+		term_cmd_keys[term_cmd_keys_pos++] = term_inbuf[term_inbuf_pos];
+	return term_inbuf[term_inbuf_pos++];
 }
 
 /** @brief Return a static SGR escape string that sets text attributes att. */

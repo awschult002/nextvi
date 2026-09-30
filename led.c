@@ -113,7 +113,7 @@ static char *kmap_map(int kmap, int c)
 int led_pos(char *s, int pos)
 {
 	if (dir_context(s) < 0)
-		return opt_left_col + xcols - pos - 1;
+		return opt_left_col + term_cols - pos - 1;
 	return pos - opt_left_col;
 }
 
@@ -431,10 +431,10 @@ static void led_printparts(sbuf *sb, int pre, int ps,
 			pos = ren_cursor(r->s, r->pos[off-two]);
 		pos += dir < 0 ? -1 : 1;
 	}
-	if (pos >= opt_left_col + xcols || pos < opt_left_col)
-		opt_left_col = pos < xcols ? 0 : pos - xcols / 2;
+	if (pos >= opt_left_col + term_cols || pos < opt_left_col)
+		opt_left_col = pos < term_cols ? 0 : pos - term_cols / 2;
 	syn_scdir(0);
-	led_crender(r->s, -1, lncol, opt_left_col, opt_left_col + xcols - lncol);
+	led_crender(r->s, -1, lncol, opt_left_col, opt_left_col + term_cols - lncol);
 	term_pos(-1, led_pos(r->s, pos) + lncol);
 	sbufn_cut(sb, psn)
 	rstate -= 2;
@@ -512,7 +512,7 @@ char *led_read(int *kmap, int c)
 static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 {
 	rstate++;
-	for (int nl = 0; r < xrows; r++) {
+	for (int nl = 0; r < term_rows; r++) {
 		if (vi_lncol) {
 			term_pos(r, 0);
 			term_kill();
@@ -523,7 +523,7 @@ static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 			sbuf_mem(cb, cs, nl+!!cs[nl])
 			sbuf_nul4(cb)
 			rstate->s = NULL;
-			led_crender(cb->s, r, vi_lncol, opt_left_col, opt_left_col + xcols - vi_lncol)
+			led_crender(cb->s, r, vi_lncol, opt_left_col, opt_left_col + term_cols - vi_lncol)
 			free(cb->s);
 			rstate->s = NULL;
 			cs += nl+!!cs[nl];
@@ -531,7 +531,7 @@ static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 		}
 		nl = r < crow-ctop ? r+ctop : (r-(crow-orow+!!(flg & 4)))+ctop;
 		led_crender(lbuf_get(xb, nl) ? lbuf_get(xb, nl) : "~", r,
-			vi_lncol, opt_left_col, opt_left_col + xcols - vi_lncol)
+			vi_lncol, opt_left_col, opt_left_col + term_cols - vi_lncol)
 	}
 	term_pos(crow - ctop, 0);
 	rstate--;
@@ -541,7 +541,7 @@ static void led_redraw(char *cs, int r, int orow, int crow, int ctop, int flg)
 void led_modeswap(void)
 {
 	preserve(int, quit_state, quit_state = 0;)
-	preserve(int, texec, texec = 0;)
+	preserve(int, term_exec_type, term_exec_type = 0;)
 	preserve(int, opt_startup_flags, opt_startup_flags ^= 2;)
 	preserve(int, ex_exec_depth, ex_exec_depth = 0;)
 	if (opt_startup_flags & 2)
@@ -554,7 +554,7 @@ void led_modeswap(void)
 		restore(quit_state)
 	else if (quit_state < -512)
 		quit_state += 256;
-	restore(texec)
+	restore(term_exec_type)
 	restore(opt_startup_flags)
 	restore(ex_exec_depth)
 }
@@ -710,9 +710,9 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 					preserve(int, opt_text_dir, opt_text_dir = 2;)
 					preserve(int, ftidx,)
 					syn_setft(ac_ft);
-					for (int left = 0; r < xrows; r++) {
-						RST(2, led_crender(is->sug, r, 0, left, left+xcols))
-						left += xcols;
+					for (int left = 0; r < term_rows; r++) {
+						RST(2, led_crender(is->sug, r, 0, left, left+term_cols))
+						left += term_cols;
 						if (left >= rstates[2].pos[rstates[2].n])
 							break;
 					}
@@ -728,13 +728,13 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			preserve(struct buf*, cur_buf,)
 			int bidx = istempbuf(cur_buf) ? -1 : cur_buf - bufs;
 			int pidx = prev_buf - bufs;
-			preserve(int, texec, texec = 0;)
+			preserve(int, term_exec_type, term_exec_type = 0;)
 			preserve(int, quit_state, quit_state = 0;)
 			preserve(int, ftidx,)
 			temp_switch(0, 0);
 			vi(1);
 			exbuf_save(cur_buf)
-			restore(texec)
+			restore(term_exec_type)
 			prev_buf = pidx >= buf_count ? bufs : bufs + pidx;
 			if (bidx >= 0)
 				cur_buf = bidx >= buf_count ? bufs : bufs + bidx;
@@ -744,7 +744,7 @@ static int led_line(sbuf *sb, int pre, int ps, char **post, int postn, char **po
 			syn_setft(xb_ft);
 			vi(1); /* redraw past screen */
 			restore(ftidx)
-			term_pos(xrows, 0);
+			term_pos(term_rows, 0);
 			if (quit_state > 0 || (quit_state < -256 && quit_state >= -512))
 				restore(quit_state)
 			else if (quit_state < -512)

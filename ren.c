@@ -335,7 +335,7 @@ char *syn_setft(char *ft)
 /** @brief Record the scroll direction; resets block highlight state unless it continues the same way. */
 void syn_scdir(int scdir)
 {
-	if (!scdir || abs(scdir) > xrows || (syn_scdirl > 0) != (scdir > 0)) {
+	if (!scdir || abs(scdir) > term_rows || (syn_scdirl > 0) != (scdir > 0)) {
 		syn_scdirl = scdir;
 		syn_blockhl = -1;
 		blockdep = 0;

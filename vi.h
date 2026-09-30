@@ -353,10 +353,10 @@ extern sbuf *term_sbuf;
 extern int term_record;
 extern int term_winch;
 extern int term_resized;
-extern int xrows, xcols;
-extern unsigned int tibuf_pos, tibuf_cnt, tibuf_sz, ticmd_pos;
-extern unsigned char *tibuf, ticmd[4096];
-extern unsigned int texec, texec_n;
+extern int term_rows, term_cols;
+extern unsigned int term_inbuf_pos, term_inbuf_count, term_inbuf_size, term_cmd_keys_pos;
+extern unsigned char *term_inbuf, term_cmd_keys[4096];
+extern unsigned int term_exec_type, term_exec_pushed;
 /* term_write: write to stdout unless opt_line_editor is 0 */
 #define term_write(s, n) if (opt_line_editor) write(1, s, n);
 void term_init(void);
@@ -375,24 +375,24 @@ void term_commit(void);
 char *term_att(int att);
 void term_push(char *s, unsigned int n);
 /* term_dec: unread the last byte returned by term_read() */
-#define term_dec() tibuf_pos--; ticmd_pos--;
+#define term_dec() term_inbuf_pos--; term_cmd_keys_pos--;
 /* term_exec: run s[0..n) as keyboard input in a nested vi(0); type is '@'
- * (macro) or '&' (see texec). The rest of the outer input queue and the
- * texec state are restored afterwards. */
+ * (macro) or '&' (see term_exec_type). The rest of the outer input queue and the
+ * term_exec_type state are restored afterwards. */
 #define term_exec(s, n, type) \
 { \
-	preserve(int, texec_n, texec_n = 0;) \
-	preserve(int, tibuf_cnt,) \
-	preserve(int, tibuf_pos, tibuf_pos = tibuf_cnt;) \
+	preserve(int, term_exec_pushed, term_exec_pushed = 0;) \
+	preserve(int, term_inbuf_count,) \
+	preserve(int, term_inbuf_pos, term_inbuf_pos = term_inbuf_count;) \
 	term_push(s, n); \
-	preserve(int, texec, texec = type;) \
+	preserve(int, term_exec_type, term_exec_type = type;) \
 	vi(0); \
-	restore(texec) \
+	restore(term_exec_type) \
 	if (quit_state > 0) \
 		quit_state = 0; \
-	restore(tibuf_pos) \
-	restore(tibuf_cnt) \
-	restore(texec_n) \
+	restore(term_inbuf_pos) \
+	restore(term_inbuf_count) \
+	restore(term_exec_pushed) \
 } \
 
 /* process management */

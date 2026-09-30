@@ -1,0 +1,11 @@
+xrows	term_rows
+xcols	term_cols
+tibuf	term_inbuf
+tibuf_pos	term_inbuf_pos
+tibuf_cnt	term_inbuf_count
+tibuf_sz	term_inbuf_size
+tibuf_prev	term_inbuf_prev
+ticmd	term_cmd_keys
+ticmd_pos	term_cmd_keys_pos
+texec	term_exec_type
+texec_n	term_exec_pushed
