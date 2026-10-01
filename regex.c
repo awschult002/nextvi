@@ -1,3 +1,31 @@
+/**
+ * @file regex.c
+ * @brief Regular expressions: a two-pass compiler to a small instruction
+ * program and a Pike VM matcher (all threads advance in lockstep over the
+ * input, no backtracking). An rset joins several patterns into one
+ * alternation and reports which one matched. An rstr holds one search
+ * pattern: a plain literal (optionally with `^` `$` `\<` `\>`) is matched by
+ * direct comparison without the VM (rstr_simple()), anything else through an
+ * rset.
+ *
+ * Syntax beyond basics: `\<` `\>` word bounds, `(?:)` non-capturing,
+ * `(?=)` `(?!)` lookahead, `(?>)` `(?<)` positive/negative test starting one
+ * char back (N bytes back after `(?#N)`, the string start if N < 0),
+ * lazy `??` `*?` `+?`, `{n,m}`.
+ *
+ * Lookaround semantics (surprising, read before editing): the body runs as
+ * an UNANCHORED search starting at the test point, and `^` inside the body
+ * anchors to that point. So `(?=foo)` means "foo appears somewhere ahead",
+ * not "foo is next"; write `(?=^foo)` for the latter. The literal fast path
+ * (direct compare, no nested VM) is used only when the body starts with `^`,
+ * has no metacharacters, and REG_ICASE is off. `(?#N)` is sticky: it sets
+ * the start offset for every lookaround after it in the pattern, not just
+ * the next one.
+ * Program words: opcode then operands; offsets are relative to the end of
+ * the 2-word instruction (REL).
+ */
+
+/** @brief Whether s starts with a word character (alnum, '_' or non-ASCII). */
 static s64 isword(const char *s)
 {
 	return uc_isalpha(*s) || uc_isdigit(*s) || s[0] == '_';
@@ -6,29 +34,30 @@ static s64 isword(const char *s)
 enum
 {
 	/* Instructions which consume input bytes */
-	CHAR,
-	CLASS,
-	MATCH,
-	ANY,
+	CHAR,	///< CHAR c: match codepoint c
+	CLASS,	///< CLASS neq n lo1 hi1 ... lo_n hi_n: match (or with neq, not match) a range
+	MATCH,	///< end of program: a match
+	ANY,	///< any character
 	/* Assert position */
-	WBEG,
-	WEND,
-	BOL,
-	EOL,
-	LOOKAROUND,
+	WBEG,	///< \< word start
+	WEND,	///< \> word end
+	BOL,	///< ^ (at the string start unless REG_NOTBOL)
+	EOL,	///< $ (at the string end, or at '\n' with REG_NEWLINE)
+	LOOKAROUND,	///< LOOKAROUND type la_idx litlen lb_start: type 1 (?=, -3 (?!, 2 (?>, -2 (?<; litlen > 0: la[la_idx] is a literal string compared directly
 	/* Other (special) instructions */
-	SAVE,
+	SAVE,	///< SAVE n: store the position in capture slot n
 	/* Instructions which take relative offset as arg */
-	JMP,
-	SPLIT,
-	RSPLIT,
+	JMP,	///< JMP off
+	SPLIT,	///< SPLIT off: fork, the next instruction first (greedy); rewritten to a unique id by reg_comp()
+	RSPLIT,	///< RSPLIT off: fork, the jump target first; rewritten to -id by reg_comp()
 };
 
 typedef struct rsub rsub;
+/** Capture slots shared by threads, reference counted (copy on write). */
 struct rsub {
-	s64 ref;
-	rsub *freesub;
-	const char *sub[];
+	s64 ref;	///< number of threads using it
+	rsub *freesub;	///< next entry on the free list
+	const char *sub[];	///< starts in the first half, ends in the second
 };
 
 typedef struct {
@@ -36,11 +65,15 @@ typedef struct {
 	s64 capsz;	/* cap_stack ints in it, also alt_stack's offset */
 } rctx;
 
+/** A VM thread: program counter and its captures. */
 typedef struct rthread {
 	s64 *pc;
 	rsub *sub;
 } rthread;
 
+/* INSERT_CODE: open num words at `at` (moving code up to pc).
+ * REL: offset from the end of a 2-word instruction at `at` to `to`.
+ * EMIT: store a word in the second pass; the first pass only counts. */
 #define INSERT_CODE(at, num, pc) \
 if (code) \
 	memmove(code + at + num, code + at, (pc - at)*sizeof(s64)); \
@@ -59,6 +92,15 @@ static void reg_free(rcode *p)
 	free(p);
 }
 
+/**
+ * @brief Compile re into prog->insts, or only count sizes if sizecode.
+ *
+ * term: start of the last atom (operand of ? * + {}); start: start of the
+ * current alternative. Each open paren pushes 5 words on cap_stack:
+ * capturing flag, term, alt_label, start, altc. alt_stack keeps the JMPs of
+ * earlier `|` alternatives, patched to jump past the group at `)` or the end.
+ * @return 0 on success, -1 on syntax error
+ */
 static s64 compilecode(char *re_loc, rcode *prog, rctx *ctx, s64 sizecode, s64 flg)
 {
 	char *re = re_loc, *s, *p;
@@ -138,6 +180,7 @@ static s64 compilecode(char *re_loc, rcode *prog, rctx *ctx, s64 sizecode, s64 f
 				if (*re == ':')
 					goto non_capture;
 				else if (*re == '#') {
+					/* never reset: applies to all later lookarounds */
 					lb_start = atoi(re+1);
 					if (!(re = strchr(re, ')')))
 						return -1;
@@ -219,6 +262,7 @@ static s64 compilecode(char *re_loc, rcode *prog, rctx *ctx, s64 sizecode, s64 f
 			if (code && alt_label) {
 				EMIT(alt_label, REL(alt_label, PC) + 1);
 				s64 _altc = cap_stack[capc];
+				/* patch this group's pending | JMPs; each later INSERT_CODE moved them by 2 */
 				for (s64 alts = altc; altc > _altc; altc--) {
 					s64 at = alt_stack[_altc+alts-altc]+(altc-_altc)*2;
 					EMIT(at, REL(at, PC) + 1);
@@ -233,6 +277,7 @@ static s64 compilecode(char *re_loc, rcode *prog, rctx *ctx, s64 sizecode, s64 f
 			}
 			break;
 		case '{':;
+			/* {n,m}: repeat the atom's code (size words) n times, then m-n optional copies */
 			s64 i, maxcnt = 0, mincnt = 0, size = PC - term, nojmp = 0;
 			re++;
 			while (uc_isdigit(*re))
@@ -354,6 +399,15 @@ static s64 compilecode(char *re_loc, rcode *prog, rctx *ctx, s64 sizecode, s64 f
 	return capc ? -1 : 0;
 }
 
+/**
+ * @brief Second pass: emit the code, number the splits, append the final
+ * SAVE + MATCH and compute the matcher's buffer sizes.
+ * @param prog  program being filled in
+ * @param re    pattern
+ * @param hdr   counts from the first pass
+ * @param ctx   compile state
+ * @param flg   REG_* flags
+ */
 static s64 reg_comp(rcode *prog, char *re, rcode *hdr, rctx *ctx, s64 flg)
 {
 	prog->len = 0;
@@ -426,6 +480,10 @@ static rcode *re_make(char *re, s64 *nsubc, s64 flg)
 	return prog;
 }
 
+/* The macros below form re_pikevm()'s body. clist/nlist are the thread lists
+ * for the current/next character; pcs[]/subs[] a stack of pending split
+ * branches; sdense[] a sparse set of splits already taken at this position
+ * (onlist drops duplicate threads). */
 #define _return(state) { if (flg & REG_NEWLINE) utf8_length[eol_ch] = 1; return state; } \
 
 #define newsub(init, copy) \
@@ -563,6 +621,12 @@ if (spc > JMP) { \
 		for (j = npc[3], cnt = 0; cnt < j && s0[cnt] == s1[cnt]; cnt++); \
 		cnt = cnt == j; \
 	} else if (!lb[j] || s0 > lb[j]) { \
+		/* lb[j] caches the match start of lookaround j: a success is \
+		 * reused while s0 has not passed it (valid only because the body \
+		 * is an unanchored search), a failure (NULL) is always rerun. \
+		 * With eol_ch set, utf8_length[eol_ch] is already 0 here, so the \
+		 * nested VM leaves it alone (it drops REG_NEWLINE instead) and \
+		 * re-zeroing it below is only defensive. */ \
 		cnt = re_pikevm(prog->la[j], s0, _subp, 2, 0); \
 		if (eol_ch) \
 			utf8_length[eol_ch] = 0; \
@@ -648,6 +712,19 @@ for (;; sp = _sp) { \
 } \
 _return(0) \
 
+/**
+ * @brief Run prog on s.
+ * With REG_NEWLINE, utf8_length['\n'] is set to 0 while matching so a
+ * newline reads as the end of the string; _return restores it. If the entry
+ * is already 0 (a caller such as lbuf_search() zeroed it, or an outer VM did)
+ * REG_NEWLINE is dropped instead and the entry is left for that caller.
+ * @param prog   compiled program
+ * @param s      string to match
+ * @param subp   receives nsubc pointers: start/end pairs for each group
+ * @param nsubc  number of pointers wanted in subp
+ * @param flg    REG_* flags
+ * @return 1 on a match
+ */
 static s64 re_pikevm(rcode *prog, const char *s, const char **subp, s64 nsubc, s64 flg)
 {
 	if (!*s)
@@ -679,6 +756,7 @@ static s64 re_pikevm(rcode *prog, const char *s, const char **subp, s64 nsubc, s
 	match(2,)
 }
 
+/** @brief Count the capturing groups of s. */
 static s64 re_groupcount(char *s)
 {
 	s64 n;
@@ -690,6 +768,7 @@ static s64 re_groupcount(char *s)
 	return n;
 }
 
+/** @brief Free a set (NULL is fine). */
 void rset_free(rset *rs)
 {
 	if (!rs)
@@ -698,6 +777,11 @@ void rset_free(rset *rs)
 	free(rs);
 }
 
+/**
+ * @brief Compile n patterns as "(p1)|(p2)|..." (no parens if only one).
+ * NULL patterns are skipped and never match (grp = -2).
+ * @return NULL on syntax error
+ */
 rset *rset_make(s64 n, char **re, s64 flg)
 {
 	s64 i, nsubc, c = 0;
@@ -737,13 +821,21 @@ rset *rset_make(s64 n, char **re, s64 flg)
 	return NULL;
 }
 
+/** @brief rset of a single pattern. */
 rset *rset_smake(char *pat, s64 flg)
 {
 	char *ss[1] = {pat};
 	return rset_make(1, ss, flg);
 }
 
-/* return the index of the matching regular expression or -1 if none matches */
+/**
+ * @brief Return the index of the matching regular expression or -1 if none matches.
+ * @param rs    the set
+ * @param s     string to search
+ * @param grps  if not NULL, receives byte offsets from s: start/end pairs of
+ *              the matching pattern's groups (group 0 first), -1 if unset
+ * @param flg   REG_* flags
+ */
 s64 rset_find(rset *rs, char *s, s64 *grps, s64 flg)
 {
 	const char *subs[rs->nsubc+2];
@@ -770,6 +862,7 @@ s64 rset_find(rset *rs, char *s, s64 *grps, s64 flg)
 	return -1;
 }
 
+/** @brief Whether any pattern matches s. */
 s64 rset_match(rset *rs, char *s, s64 flg)
 {
 	return re_pikevm(rs->regex, s, NULL, 0, flg);
