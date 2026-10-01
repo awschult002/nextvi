@@ -81,7 +81,7 @@ static void vi_drawmsg(char *msg)
 	preserve(s64, opt_text_dir, opt_text_dir = 2;)
 	preserve(s64, ftidx,)
 	syn_setft(bar_ft);
-	RST(2, led_crender(msg, xrows, 0, 0, xcols))
+	RST(2, led_crender(msg, term_rows, 0, 0, term_cols))
 	restore(opt_text_dir)
 	restore(ftidx)
 }
@@ -132,9 +132,9 @@ s64 vi_srow(s64 row)
 	s64 i, trow = -xtopsub;
 	if (!xlw)
 		return row - view_top_row;
-	for (i = row; i < view_top_row && trow > -xrows; i++)
+	for (i = row; i < view_top_row && trow > -term_rows; i++)
 		trow -= vi_lnrows(lbuf_get(xb, i));
-	for (i = view_top_row; i < row && trow < xrows; i++)
+	for (i = view_top_row; i < row && trow < term_rows; i++)
 		trow += vi_lnrows(lbuf_get(xb, i));
 	return trow;
 }
@@ -146,7 +146,7 @@ static s64 vi_topdiff(s64 row, s64 sub)
 	s64 i, n = sub - xtopsub, dir = row > view_top_row ? 1 : -1;
 	if (!xlw)
 		return row - view_top_row;
-	for (i = MIN(row, view_top_row); i < MAX(row, view_top_row) && n < xrows && n > -xrows; i++)
+	for (i = MIN(row, view_top_row); i < MAX(row, view_top_row) && n < term_rows && n > -term_rows; i++)
 		n += dir * vi_lnrows(lbuf_get(xb, i));
 	return n;
 }
@@ -156,8 +156,8 @@ static s64 vi_botrow(void)
 {
 	s64 h, row = view_top_row, trow = -xtopsub, len = lbuf_len(xb);
 	if (!xlw)
-		return MIN(view_top_row + xrows, MAX(1, len)) - 1;
-	while (row + 1 < len && trow + (h = vi_lnrows(lbuf_get(xb, row))) < xrows)
+		return MIN(view_top_row + term_rows, MAX(1, len)) - 1;
+	while (row + 1 < len && trow + (h = vi_lnrows(lbuf_get(xb, row))) < term_rows)
 		trow += h, row++;
 	return row;
 }
@@ -169,14 +169,14 @@ static s64 vi_fullrow(void)
 	if (!xlw || !xtopsub)
 		return view_top_row;
 	return view_top_row + 1 < lbuf_len(xb) &&
-		vi_lnrows(lbuf_get(xb, view_top_row)) - xtopsub < xrows ? view_top_row + 1 : view_top_row;
+		vi_lnrows(lbuf_get(xb, view_top_row)) - xtopsub < term_rows ? view_top_row + 1 : view_top_row;
 }
 
 /* the last line shown in full; the bottom line may be cut in half */
 static s64 vi_lastrow(void)
 {
 	s64 row = vi_botrow();
-	if (xlw && row > view_top_row && vi_srow(row) + vi_lnrows(lbuf_get(xb, row)) > xrows)
+	if (xlw && row > view_top_row && vi_srow(row) + vi_lnrows(lbuf_get(xb, row)) > term_rows)
 		row--;
 	return row;
 }
@@ -223,11 +223,11 @@ static void vi_toprows(s64 row, s64 n)
 	vi_topadv(-n);
 }
 
-#define vi_center(row)	vi_toprows(row, xrows / 2)
+#define vi_center(row)	vi_toprows(row, term_rows / 2)
 /* whether the given line is off the screen; adj rows are reserved at the bottom */
 #define vi_unseen(row, adj) \
-	((row) < view_top_row || (xlw ? vi_srow(row) >= xrows - (adj) \
-			: (row) >= view_top_row + xrows - (adj)))
+	((row) < view_top_row || (xlw ? vi_srow(row) >= term_rows - (adj) \
+			: (row) >= view_top_row + term_rows - (adj)))
 
 /* the terminal row of the cursor */
 static s64 vi_crow(void)
@@ -255,8 +255,8 @@ static void vi_curseg(s64 trow)
 	seg = trow < 0 ? pos / w : trow - srow;
 	if (srow + seg < 0)
 		seg = -srow;
-	else if (srow + seg >= xrows)
-		seg = xrows - 1 - srow;
+	else if (srow + seg >= term_rows)
+		seg = term_rows - 1 - srow;
 	if (seg < 0 || seg > cmax / w)	/* the line has no visible segment */
 		return;
 	vi_col = MIN(seg * w + pos % w, cmax);
@@ -293,7 +293,7 @@ nrow = cursor_row; \
 noff = cursor_off; \
 for (i = 0, ret = 0;; i++) { \
 	l1 = ren_next(c, ren_pos(c, noff), 1)-1-opt_left_col+vi_lncol; \
-	if (l1 > xcols || l1 < 0 || ret || l1 >= rstate->cmax + vi_lncol) \
+	if (l1 > term_cols || l1 < 0 || ret || l1 >= rstate->cmax + vi_lncol) \
 		break; \
 	i = i > 99 ? i % 100 : i; \
 	itoa(i%10 ? i%10 : i, snum); \
@@ -440,7 +440,7 @@ static void vi_visual_attrib(char *s, s64 row)
 static void vi_drawdiag(const char *diag, s64 sev, s64 r, s64 col)
 {
 	static const char *sevname[] = {"info", "error", "warning", "info", "hint"};
-	if (col < 0 || col >= xcols)
+	if (col < 0 || col >= term_cols)
 		return;
 	sbuf_smake(sb, 256)
 	sbuf_str(sb, "  ")
@@ -452,7 +452,7 @@ static void vi_drawdiag(const char *diag, s64 sev, s64 r, s64 col)
 	preserve(s64, syn_blockhl, syn_blockhl = -1;)
 	preserve(s64, ftidx,)
 	syn_setft(lsp_ft);
-	RST(2, led_prender(sb->s, r, col, 0, xcols - col))
+	RST(2, led_prender(sb->s, r, col, 0, term_cols - col))
 	restore(syn_blockhl)
 	restore(ftidx)
 	free(sb->s);
@@ -462,7 +462,7 @@ static s64 vi_lnwid;		/* the widest visible line number, per frame */
 
 static void vi_lnwidset(void)
 {
-	vi_lnwid = xlw ? vi_botrow() + 1 : view_top_row + xrows;
+	vi_lnwid = xlw ? vi_botrow() + 1 : view_top_row + term_rows;
 }
 
 /* the rows drawing is clipped to; a scroll only redraws the rows it
@@ -474,14 +474,14 @@ static s64 vi_rendrow(char *s, s64 trow, s64 lncol, s64 source_row)
 {
 	s64 h, w, k, i, beg, lim;
 	if (!xlw) {
-		led_srender(s, trow, lncol, opt_left_col, opt_left_col + xcols - lncol,
+		led_srender(s, trow, lncol, opt_left_col, opt_left_col + term_cols - lncol,
 			ts_document(xb), source_row, 0)
 		return 1;
 	}
 	w = ren_wrapw(lncol);
 	h = vi_lncmax(s, 1) / w + 1;
 	beg = MAX(vi_rowbeg - trow, 0);
-	lim = MIN(h, (vi_rowend ? vi_rowend : xrows) - trow);
+	lim = MIN(h, (vi_rowend ? vi_rowend : term_rows) - trow);
 	for (i = beg; i < lim; i++) {
 		/* the block highlight scans the rows in the scroll direction */
 		k = syn_scdirl < 0 ? beg + lim - 1 - i : i;
@@ -504,7 +504,7 @@ static s64 vi_drawrow(s64 row, s64 trow)
 	led_ext *lwx = NULL;
 	char *c, *s;
 	static char ch[5] = "~";
-	if (opt_multiline_prompt == 1 && !vi_status && trow == xrows - 1)
+	if (opt_multiline_prompt == 1 && !vi_status && trow == term_rows - 1)
 		return 1;
 	if (*vi_word && opt_line_editor && !xlw) {
 		s64 noff, nrow, ret;
@@ -514,10 +514,10 @@ static s64 vi_drawrow(s64 row, s64 trow)
 			s = lbuf_get(xb, row - vi_rshift);
 			goto skip;
 		}
-		char tmp[xcols+3], snum[32];
-		memset(tmp, ' ', xcols+1);
-		tmp[xcols+1] = '\n';
-		tmp[xcols+2] = '\0';
+		char tmp[term_cols+3], snum[32];
+		memset(tmp, ' ', term_cols+1);
+		tmp[term_cols+1] = '\n';
+		tmp[term_cols+2] = '\0';
 		i1 = uc_isupper(*vi_word);
 		if (*vi_word == 'e' || *vi_word == 'E')
 			vi_drawnum(lbuf_wordend(xb, i1, 2, &nrow, &noff))
@@ -529,14 +529,14 @@ static s64 vi_drawrow(s64 row, s64 trow)
 		} else
 			vi_drawnum(lbuf_wordend(xb, i1, -2, &nrow, &noff))
 		l1 = ren_next(c, ren_pos(c, cursor_off), 1)-1-opt_left_col+vi_lncol;
-		if (l1 >= 0 && l1 <= xcols)
+		if (l1 >= 0 && l1 <= term_cols)
 			tmp[l1] = *vi_word;
 		preserve(s64, opt_reorder, opt_reorder = 0;)
 		preserve(s64, syn_blockhl, syn_blockhl = -1;)
 		preserve(s64, opt_text_dir, opt_text_dir = dir_context(c) * 2;)
 		preserve(s64, ftidx,)
 		syn_setft(n_ft);
-		RST(2, led_crender(tmp, trow, 0, 0, xcols))
+		RST(2, led_crender(tmp, trow, 0, 0, term_cols))
 		restore(opt_reorder)
 		restore(syn_blockhl)
 		restore(opt_text_dir)
@@ -575,7 +575,7 @@ static s64 vi_drawrow(s64 row, s64 trow)
 		if (lnnum == 1 || lnnum & 4 || lnnum & 8) {
 			c = itoa(labs(cursor_row-row+vi_rshift), c);
 			*c++ = ' ';
-			i1 = itoalen(xrows);
+			i1 = itoalen(term_rows);
 		}
 		*c = '\0';
 		l1 = (c - tmp) + (i+i1 - (strlen(tmp) - !!i - !!i1));
@@ -633,12 +633,12 @@ static void vi_drawagain(s64 i)
 	syn_scdir(0);
 	vi_lnwidset();
 	if (!xlw) {
-		for (; i < view_top_row + xrows; i++)
+		for (; i < view_top_row + term_rows; i++)
 			vi_drawrow(i, i - view_top_row);
 		return;
 	}
 	vi_rshift = 0;			/* the word overlay is not drawn when wrapping */
-	for (trow = vi_srow(i); trow < xrows; i++)
+	for (trow = vi_srow(i); trow < term_rows; i++)
 		trow += vi_drawrow(i, trow);
 }
 
@@ -646,7 +646,7 @@ static void vi_drawagain(s64 i)
 static void vi_drawscroll(s64 n)
 {
 	s64 h, row = view_top_row, trow;
-	if (n <= -xrows || n >= xrows) {	/* no row of the frame survives */
+	if (n <= -term_rows || n >= term_rows) {	/* no row of the frame survives */
 		vi_drawagain(view_top_row);
 		return;
 	}
@@ -656,12 +656,12 @@ static void vi_drawscroll(s64 n)
 	syn_scdir(n);
 	vi_rshift = 0;			/* the word overlay is not drawn when wrapping */
 	if (n < 0) {			/* the blank rows are at the bottom */
-		vi_rowbeg = xrows + n;
+		vi_rowbeg = term_rows + n;
 		for (trow = -xtopsub;
 				trow + (h = vi_lnrows(lbuf_get(xb, row))) <= vi_rowbeg;
 				row++)
 			trow += h;
-		for (; trow < xrows; row++)
+		for (; trow < term_rows; row++)
 			trow += vi_drawrow(row, trow);
 		vi_rowbeg = 0;
 		return;
@@ -689,11 +689,11 @@ static void vi_drawupdate(s64 i)
 	term_room(i);
 	syn_scdir(i);
 	if (i < 0) {
-		n = MIN(-i, xrows);
+		n = MIN(-i, term_rows);
 		for (i = 0; i < n; i++)
-			vi_drawrow(view_top_row + xrows - n + i, xrows - n + i);
+			vi_drawrow(view_top_row + term_rows - n + i, term_rows - n + i);
 	} else {
-		n = MIN(i, xrows);
+		n = MIN(i, term_rows);
 		for (i = n-1; i >= 0; i--)
 			vi_drawrow(view_top_row + i, i);
 	}
@@ -701,10 +701,10 @@ static void vi_drawupdate(s64 i)
 
 static char *vi_prompt(char *msg, char *ft, char *insert, s64 *ret, s64 *kmap, s64 *mlen)
 {
-	sbuf_smake(sb, xcols)
+	sbuf_smake(sb, term_cols)
 	sbuf_str(sb, msg)
 	*mlen = sb->s_n;
-	term_pos(xrows, 0);
+	term_pos(term_rows, 0);
 	syn_setft(ft);
 	*ret = led_prompt(sb, insert, kmap, NULL, 0, 1) == '\n';
 	syn_setft(xb_ft);
@@ -770,10 +770,10 @@ static s64 vi_col2off(struct lbuf *lb, s64 row, s64 col)
 static void vi_isearchhl(sbuf *sb)
 {
 	s64 offs[search_rset->rs ? search_rset->rs->nsubc : 2];
-	s64 cnt[xrows], ola[3];
+	s64 cnt[term_rows], ola[3];
 	s64 row, off, beg, end, flg, i, n;
 	char *s;
-	for (row = view_top_row; row < view_top_row + xrows && row < lbuf_len(xb); row++) {
+	for (row = view_top_row; row < view_top_row + term_rows && row < lbuf_len(xb); row++) {
 		s = lbuf_get(xb, row);
 		off = 0;
 		flg = REG_NEWLINE;
@@ -818,12 +818,12 @@ static char *vi_isearch(s64 cmd, s64 *ret, s64 *mlen, s64 *frow, s64 *foff)
 	char *okwd = ex_regget('/') ? strdup(ex_regget('/')->s) : NULL;
 	ins_state is;
 	ins_init(is)
-	sbuf_smake(sb, xcols)
+	sbuf_smake(sb, term_cols)
 	sbuf_smake(hsb, sizeof(s64) * 24)
 	sbuf_chr(sb, cmd)
 	*mlen = sb->s_n;
 	while (1) {
-		term_pos(xrows, 0);
+		term_pos(term_rows, 0);
 		syn_setft(vs_ft);
 		len = sb->s_n;
 		key = led_prompt(sb, NULL, &cur_keymap, &is, *mlen, 2);
@@ -852,8 +852,8 @@ static char *vi_isearch(s64 cmd, s64 *ret, s64 *mlen, s64 *frow, s64 *foff)
 						sdir, 1, &row, &off);
 				if (found)
 					srow = cursor_row = row, soff = cursor_off = off;
-				if (cursor_row < view_top_row || cursor_row >= view_top_row + xrows)
-					view_top_row = MAX(0, cursor_row - xrows / 2);
+				if (cursor_row < view_top_row || cursor_row >= view_top_row + term_rows)
+					view_top_row = MAX(0, cursor_row - term_rows / 2);
 				vi_isearchhl(hsb);
 			}
 		}
@@ -1059,9 +1059,9 @@ static s64 fs_searchback(s64 cnt, s64 *row, s64 *off)
 	return 0;
 }
 
-static char rep_cmd[sizeof(ticmd)];	/* the last command */
+static char rep_cmd[sizeof(term_cmd_keys)];	/* the last command */
 static s64 rep_len;
-#define rep_record() memcpy(rep_cmd, ticmd, ticmd_pos); rep_len = ticmd_pos;
+#define rep_record() memcpy(rep_cmd, term_cmd_keys, term_cmd_keys_pos); rep_len = term_cmd_keys_pos;
 static __thread s64 redraw_thread;	/* paint thread: never measure on slot 0 */
 
 static void vc_status(s64 type)
@@ -1369,16 +1369,16 @@ static s64 vi_region(s64 cmd, s64 *row, s64 *off)
 		goto lnregion;
 	case 'L':
 		*row = xlw ? MAX(vi_fullrow(), vi_lastrow() - cnt + 1)
-			: MIN(view_top_row + xrows - 1 - cnt + 1, lbuf_len(xb) - 1);
+			: MIN(view_top_row + term_rows - 1 - cnt + 1, lbuf_len(xb) - 1);
 		goto lnregion;
 	case 'M':
 		if (!xlw) {
-			*row = MIN(view_top_row + xrows / 2, lbuf_len(xb) - 1);
+			*row = MIN(view_top_row + term_rows / 2, lbuf_len(xb) - 1);
 			goto lnregion;
 		}
 		preserve(s64, view_top_row,)
 		preserve(s64, xtopsub,)
-		vi_topadv(xrows / 2);		/* the halfway line, wrapping aside */
+		vi_topadv(term_rows / 2);		/* the halfway line, wrapping aside */
 		*row = view_top_row;
 		restore(view_top_row)
 		restore(xtopsub)
@@ -1455,7 +1455,7 @@ static s64 vi_change(s64 r1, s64 o1, s64 r2, s64 o2, s64 lnmode)
 	char *post, *ln = lbuf_get(xb, r1);
 	sbuf rsb;
 	s64 key, tlen, l1, l2 = 1, postn = 1;
-	sbuf_smake(sb, xcols)
+	sbuf_smake(sb, term_cols)
 	if (lnmode || !ln) {
 		o1 = l1 = vi_indents(ln);
 		post = "\n";
@@ -1812,7 +1812,7 @@ static s64 vc_insert(s64 cmd)
 {
 	char *post, *ln = lbuf_get(xb, cursor_row);
 	s64 row, cmdo, l1, off, key, postn = 1;
-	sbuf_smake(sb, xcols)
+	sbuf_smake(sb, term_cols)
 	if (cmd == 'I')
 		cursor_off = lbuf_indents(xb, cursor_row);
 	else if (cmd == 'A')
@@ -1820,11 +1820,11 @@ static s64 vc_insert(s64 cmd)
 	else if (cmd == 'o') {
 		cursor_row++;
 		if (xlw) {
-			if (vi_srow(cursor_row) >= xrows) {
-				while (vi_srow(cursor_row) >= xrows && vi_topadv(1));
+			if (vi_srow(cursor_row) >= term_rows) {
+				while (vi_srow(cursor_row) >= term_rows && vi_topadv(1));
 				vi_drawagain(view_top_row);
 			}
-		} else if (cursor_row - view_top_row == xrows)
+		} else if (cursor_row - view_top_row == term_rows)
 			vi_drawagain(++view_top_row);
 	}
 	cursor_off = ren_noeol(ln, cursor_off);
@@ -1989,7 +1989,7 @@ static void vi_spellmsg(void)
 		return;
 	sbuf_smake(sb, 128)
 	for (n = 1; (w = spell_sug(sug, n, &slen)); n++) {
-		if (sb->s_n + slen + 6 > xcols * 4)	/* up to 4 bytes per column */
+		if (sb->s_n + slen + 6 > term_cols * 4)	/* up to 4 bytes per column */
 			break;
 		if (n > 1)
 			sbuf_chr(sb, ' ')
@@ -2018,7 +2018,7 @@ static void vc_execute(s64 cmd)
 	}
 	exec_buf = c;
 	if (c == ':') {
-		term_pos(xrows, 0);
+		term_pos(term_rows, 0);
 		for (i = 0; i < n && (buf = ex_regget(c)); i++)
 			ex_exec(buf->s);
 		vi_mod |= 1;
@@ -2042,15 +2042,15 @@ if (cursor_row < 0 || cursor_row >= lbuf_len(xb)) \
 if (cursor_row < view_top_row) { \
 	view_top_row = cursor_row; \
 	xtopsub = 0; \
-} else if (!xlw && cursor_row >= view_top_row + xrows) \
-	view_top_row = cursor_row - xrows + 1; \
+} else if (!xlw && cursor_row >= view_top_row + term_rows) \
+	view_top_row = cursor_row - term_rows + 1; \
 if (xlw) { \
 	xtopsub = MIN(xtopsub, vi_lnrows(lbuf_get(xb, view_top_row)) - 1); \
-	if (cursor_row - view_top_row >= xrows) \
-		vi_toprows(cursor_row, xrows - 1); \
+	if (cursor_row - view_top_row >= term_rows) \
+		vi_toprows(cursor_row, term_rows - 1); \
 	while (vi_crow() < 0 && xtopsub > 0) \
 		xtopsub--; \
-	while (vi_crow() >= xrows && vi_topadv(1)); \
+	while (vi_crow() >= term_rows && vi_topadv(1)); \
 } \
 
 /* place the terminal cursor at rendered position pos of the cursor line */
@@ -2082,7 +2082,7 @@ void vi(s64 init)
 		s64 otop = view_top_row;
 		s64 otopsub = xtopsub;
 		s64 oleft = opt_left_col;
-		ticmd_pos = 0;
+		term_cmd_keys_pos = 0;
 		vi_mod = 0;
 		lsp_wake = 1;
 		vi_ybuf = vi_yankbuf(TK_CTL('l'));
@@ -2101,7 +2101,7 @@ void vi(s64 init)
 			if (xlw)
 				vi_drawrow(vi_botrow(), vi_srow(vi_botrow()));
 			else
-				vi_drawrow(otop + xrows - 1, xrows - 1);
+				vi_drawrow(otop + term_rows - 1, term_rows - 1);
 		}
 		led_extcut();
 		if (vi_ybuf < 0)
@@ -2120,7 +2120,7 @@ void vi(s64 init)
 			cursor_row = nrow;
 			cursor_off = noff;
 			if (xlw && strchr("HML", mv))
-				vi_curseg(mv == 'M' ? xrows / 2 : mv == 'H' ?
+				vi_curseg(mv == 'M' ? term_rows / 2 : mv == 'H' ?
 					vi_srow(cursor_row) : vi_srow(cursor_row) +
 					vi_lnrows(lbuf_get(xb, cursor_row)) - 1);
 		} else if (mv == 0) {
@@ -2130,13 +2130,13 @@ void vi(s64 init)
 			c = term_read(TK_CTL('l'));
 			switch (c) {
 			case TK_CTL('b'):
-				vi_scrollbackward(MAX(1, vi_arg) * (xrows - 1));
+				vi_scrollbackward(MAX(1, vi_arg) * (term_rows - 1));
 				cursor_off = lbuf_indents(xb, cursor_row);
 				vi_curseg(-1);
 				vi_mod |= 4;
 				break;
 			case TK_CTL('f'):
-				vi_scrollforward(MAX(1, vi_arg) * (xrows - 1));
+				vi_scrollforward(MAX(1, vi_arg) * (term_rows - 1));
 				cursor_off = lbuf_indents(xb, cursor_row);
 				vi_curseg(-1);
 				vi_mod |= 4;
@@ -2158,7 +2158,7 @@ void vi(s64 init)
 					break;
 				if (vi_arg)
 					vi_scrollud = vi_arg;
-				n = vi_scrollud ? vi_scrollud : xrows / 2;
+				n = vi_scrollud ? vi_scrollud : term_rows / 2;
 				if (xlw) {
 					if (view_top_row > 0)
 						vi_topadv(-n);
@@ -2178,15 +2178,15 @@ void vi(s64 init)
 					break;
 				if (vi_arg)
 					vi_scrollud = vi_arg;
-				n = vi_scrollud ? vi_scrollud : xrows / 2;
+				n = vi_scrollud ? vi_scrollud : term_rows / 2;
 				if (xlw) {
 					vi_topadv(n);
 					vi_wrapstep(&cursor_row, n, 1);
 					cursor_row = MAX(cursor_row, vi_fullrow());
 				} else {
 					cursor_row = MIN(MAX(0, lbuf_len(xb) - 1), cursor_row + n);
-					if (view_top_row < lbuf_len(xb) - xrows)
-						view_top_row = MIN(lbuf_len(xb) - xrows, view_top_row + n);
+					if (view_top_row < lbuf_len(xb) - term_rows)
+						view_top_row = MIN(lbuf_len(xb) - term_rows, view_top_row + n);
 				}
 				cursor_off = lbuf_indents(xb, cursor_row);
 				vi_curseg(-1);
@@ -2249,7 +2249,7 @@ void vi(s64 init)
 				status:
 				if (vi_arg) {
 					vi_status = vi_arg > 1 ? 0 : term_resized;
-					xrows += vi_status ? -1 : 1;
+					term_rows += vi_status ? -1 : 1;
 				}
 				vc_status(vi_tsm);
 				break;
@@ -2545,7 +2545,7 @@ void vi(s64 init)
 			case TK_CTL('z'):
 			case TK_CTL('l'):
 				if (c == TK_CTL('z')) {
-					term_pos(xrows, 0);
+					term_pos(term_rows, 0);
 					term_suspend();
 				} else {
 					term_done();
@@ -2570,7 +2570,7 @@ void vi(s64 init)
 					vi_center(cursor_row);
 					break;
 				case '-':
-					vi_toprows(cursor_row, xrows -
+					vi_toprows(cursor_row, term_rows -
 						vi_lnrows(lbuf_get(xb, cursor_row)));
 					break;
 				case 'l':
@@ -2613,7 +2613,7 @@ void vi(s64 init)
 					}
 					restore(opt_search_group)
 					restore(opt_startup_flags)
-					vi_mod |= !texec;
+					vi_mod |= !term_exec_type;
 				} else if (k == 'q') {
 					preserve(s64, opt_line_editor, opt_line_editor = 0;)
 					char cmd[64] = "g/./& ";
@@ -2677,7 +2677,7 @@ void vi(s64 init)
 				else
 					term_push("cc", 2);
 				motion:
-				ticmd_pos--;
+				term_cmd_keys_pos--;
 				goto re_motion;
 			case 'r':
 				vi_mod |= vc_replace();
@@ -2770,8 +2770,8 @@ void vi(s64 init)
 			vi_col = vi_off2col(xb, cursor_row, cursor_off);
 		if (xlw)
 			opt_left_col = 0;
-		else if (vi_col >= opt_left_col + xcols || vi_col < opt_left_col)
-			opt_left_col = vi_col < xcols ? 0 : vi_col - xcols / 2;
+		else if (vi_col >= opt_left_col + term_cols || vi_col < opt_left_col)
+			opt_left_col = vi_col < term_cols ? 0 : vi_col - term_cols / 2;
 		n = led_pos(ln, ren_cursor(ln, vi_col));
 		if (opt_multiline_prompt > 1) {
 			if (!print_newline)
@@ -2837,7 +2837,7 @@ void vi(s64 init)
 	}
 	vi_rendwait();
 	if (--vi_ex_depth == 0) {
-		term_pos(xrows - !vi_status, 0);
+		term_pos(term_rows - !vi_status, 0);
 		if (opt_multiline_prompt > 0 && !print_newline)
 			term_chr('\n');
 		else
@@ -2880,7 +2880,7 @@ static void *vi_rendloop(void *arg)
 				|| (*vi_word && orow != cursor_row))
 			vi_drawagain(view_top_row);
 		else if (*vi_word && !xlw && (ooff != cursor_off || vi_mod & 2)
-				&& cursor_row+1 < view_top_row + xrows)
+				&& cursor_row+1 < view_top_row + term_rows)
 			vi_drawrow(cursor_row+1, cursor_row+1 - view_top_row);
 		else if (view_top_row != otop || xtopsub != otopsub)
 			vi_drawupdate(vi_topdiff(otop, otopsub));
@@ -2900,7 +2900,7 @@ static void *vi_rendloop(void *arg)
 			vi_drawrow(cursor_row, vi_srow(cursor_row));
 		}
 		if (vi_status && opt_multiline_prompt < 1) {
-			xrows -= term_resized != vi_status;
+			term_rows -= term_resized != vi_status;
 			vi_status = term_resized;
 			vc_status(vi_tsm);
 			if (opt_multiline_prompt > 0)
@@ -2933,7 +2933,7 @@ void vi_rendwait(void)
 /* whether input is waiting; a frame drawn now is stale before it lands */
 static s64 vi_rendpend(void)
 {
-	return tibuf_pos < tibuf_cnt || poll(&term_ufd, 1, 0) > 0;
+	return term_inbuf_pos < term_inbuf_count || poll(&term_ufd, 1, 0) > 0;
 }
 
 /* queue a frame and hand the input loop its thread back */
@@ -3021,7 +3021,7 @@ int main(int argc, char *argv[])
 			}
 		}
 	}
-	tibuf = emalloc(tibuf_sz);
+	term_inbuf = emalloc(term_inbuf_size);
 	if (!(opt_startup_flags & 1))
 		term_init();
 	if (opt_startup_flags & 8)

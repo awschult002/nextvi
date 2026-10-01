@@ -88,7 +88,7 @@ static char *kmap_map(s64 kmap, s64 c)
 s64 led_pos(char *s, s64 pos)
 {
 	if (dir_context(s) < 0)
-		return opt_left_col + xcols - pos - 1;
+		return opt_left_col + term_cols - pos - 1;
 	return pos - opt_left_col;
 }
 
@@ -426,8 +426,8 @@ static s64 led_complist(sbuf *lst, s64 beg)
 	rstate->s = NULL;
 	rp = ren_position(lst->s);
 	tot = rp->pos[rp->n];
-	for (r = 1; r < xrows && beg < tot; r++) {
-		end = beg + xcols;
+	for (r = 1; r < term_rows && beg < tot; r++) {
+		end = beg + term_cols;
 		if (end < tot) {
 			for (i = end; i > beg; i--)
 				if (*rp->chrs[rp->col[i]] == ' ') {
@@ -481,7 +481,7 @@ static void led_printparts(sbuf *sb, s64 pre, s64 ps,
 		s64 w = ren_wrapw(lncol), k, trow, b;
 		opt_left_col = 0;
 		led_rowh = MAX(MAX(0, r->cmax), pos) / w + 1;
-		k = led_row + pos / w - xrows + 1;
+		k = led_row + pos / w - term_rows + 1;
 		if (k > 0) {			/* scroll to keep the cursor visible */
 			term_pos(0, 0);
 			term_room(-k);
@@ -494,7 +494,7 @@ static void led_printparts(sbuf *sb, s64 pre, s64 ps,
 		}
 		if (ts_preview)
 			led_preview_draw(ps);
-		for (k = MAX(0, -led_row); k < led_rowh && led_row + k < xrows; k++) {
+		for (k = MAX(0, -led_row); k < led_rowh && led_row + k < term_rows; k++) {
 			if (k && lncol) {
 				term_pos(led_row + k, 0);
 				term_kill();
@@ -507,7 +507,7 @@ static void led_printparts(sbuf *sb, s64 pre, s64 ps,
 		}
 		/* the rows below shift with the edited line */
 		preserve(ren_state*, rstate, rstate = rstates;)
-		for (b = led_nextb, trow = led_row + led_rowh; !ts_preview && trow < xrows; b++)
+		for (b = led_nextb, trow = led_row + led_rowh; !ts_preview && trow < term_rows; b++)
 			trow += vi_drawline(b, trow);
 		restore(rstate)
 		term_pos(led_row + pos / w, lncol + pos % w);
@@ -515,12 +515,12 @@ static void led_printparts(sbuf *sb, s64 pre, s64 ps,
 		rstate -= 2;
 		return;
 	}
-	if (pos >= opt_left_col + xcols || pos < opt_left_col)
-		opt_left_col = pos < xcols ? 0 : pos - xcols / 2;
+	if (pos >= opt_left_col + term_cols || pos < opt_left_col)
+		opt_left_col = pos < term_cols ? 0 : pos - term_cols / 2;
 	if (ts_preview && poff == &cursor_off)
 		led_preview_current(r->s, ps, lncol);
 	else
-		led_crender(r->s, -1, lncol, opt_left_col, opt_left_col + xcols - lncol);
+		led_crender(r->s, -1, lncol, opt_left_col, opt_left_col + term_cols - lncol);
 	term_pos(-1, led_pos(r->s, pos) + lncol);
 	sbufn_cut(sb, psn)
 	rstate -= 2;
@@ -594,7 +594,7 @@ static void led_redrawlw(s64 ctop, s64 crow)
 		return;
 	}
 	preserve(ren_state*, rstate, rstate = rstates;)
-	for (s64 i = ctop, trow = vi_srow(ctop); trow < xrows && i < crow; i++)
+	for (s64 i = ctop, trow = vi_srow(ctop); trow < term_rows && i < crow; i++)
 		trow += vi_drawline(i, trow);
 	restore(rstate)
 }
@@ -610,7 +610,7 @@ static void led_redraw(char *cs, s64 r, s64 orow, s64 crow, s64 ctop, s64 flg)
 		return;
 	}
 	rstate++;
-	for (s64 nl = 0; r < xrows; r++) {
+	for (s64 nl = 0; r < term_rows; r++) {
 		if (vi_lncol) {
 			term_pos(r, 0);
 			term_kill();
@@ -621,7 +621,7 @@ static void led_redraw(char *cs, s64 r, s64 orow, s64 crow, s64 ctop, s64 flg)
 			sbuf_mem(cb, cs, nl+!!cs[nl])
 			sbuf_nul4(cb)
 			rstate->s = NULL;
-			led_crender(cb->s, r, vi_lncol, opt_left_col, opt_left_col + xcols - vi_lncol)
+			led_crender(cb->s, r, vi_lncol, opt_left_col, opt_left_col + term_cols - vi_lncol)
 			free(cb->s);
 			rstate->s = NULL;
 			cs += nl+!!cs[nl];
@@ -629,7 +629,7 @@ static void led_redraw(char *cs, s64 r, s64 orow, s64 crow, s64 ctop, s64 flg)
 		}
 		nl = r < crow-ctop ? r+ctop : (r-(crow-orow+!!(flg & 4)))+ctop;
 		led_crender(lbuf_get(xb, nl) ? lbuf_get(xb, nl) : "~", r,
-			vi_lncol, opt_left_col, opt_left_col + xcols - vi_lncol)
+			vi_lncol, opt_left_col, opt_left_col + term_cols - vi_lncol)
 	}
 	term_pos(crow - ctop, 0);
 	rstate--;
@@ -639,7 +639,7 @@ void led_modeswap(void)
 {
 	preserve(struct ts_state*, ts_preview, ts_preview = NULL;)
 	preserve(s64, quit_state, quit_state = 0;)
-	preserve(s64, texec, texec = 0;)
+	preserve(s64, term_exec_type, term_exec_type = 0;)
 	preserve(s64, opt_startup_flags, opt_startup_flags ^= 2;)
 	preserve(s64, ex_exec_depth, ex_exec_depth = 0;)
 	if (opt_startup_flags & 2)
@@ -652,7 +652,7 @@ void led_modeswap(void)
 		restore(quit_state)
 	else if (quit_state < -512)
 		quit_state += 256;
-	restore(texec)
+	restore(term_exec_type)
 	restore(opt_startup_flags)
 	restore(ex_exec_depth)
 	restore(ts_preview)
@@ -821,9 +821,9 @@ static s64 led_line(sbuf *sb, s64 pre, s64 ps, char **post, s64 postn, char **po
 					preserve(s64, opt_text_dir, opt_text_dir = 2;)
 					preserve(s64, ftidx,)
 					syn_setft(ac_ft);
-					for (s64 left = 0; r < xrows; r++) {
-						RST(2, led_crender(is->sug, r, 0, left, left+xcols))
-						left += xcols;
+					for (s64 left = 0; r < term_rows; r++) {
+						RST(2, led_crender(is->sug, r, 0, left, left+term_cols))
+						left += term_cols;
 						if (left >= rstates[2].pos[rstates[2].n])
 							break;
 					}
@@ -839,7 +839,7 @@ static s64 led_line(sbuf *sb, s64 pre, s64 ps, char **post, s64 postn, char **po
 			preserve(struct buf*, cur_buf,)
 			s64 bidx = istempbuf(cur_buf) ? -1 : cur_buf - bufs;
 			s64 pidx = prev_buf - bufs;
-			preserve(s64, texec, texec = 0;)
+			preserve(s64, term_exec_type, term_exec_type = 0;)
 			preserve(s64, quit_state, quit_state = 0;)
 			preserve(s64, ftidx,)
 			preserve(s64, ex_exec_depth, if (flg & LED_AGENT) ex_exec_depth = 0;)
@@ -854,7 +854,7 @@ static s64 led_line(sbuf *sb, s64 pre, s64 ps, char **post, s64 postn, char **po
 			restore(opt_startup_flags)
 			restore(ex_exec_depth)
 			exbuf_save(cur_buf)
-			restore(texec)
+			restore(term_exec_type)
 			prev_buf = pidx >= buf_count ? bufs : bufs + pidx;
 			if (bidx >= 0)
 				cur_buf = bidx >= buf_count ? bufs : bufs + bidx;
@@ -866,7 +866,7 @@ static s64 led_line(sbuf *sb, s64 pre, s64 ps, char **post, s64 postn, char **po
 				vi(1); /* redraw past screen */
 			restore(ftidx)
 			restore(ts_preview)
-			term_pos(xrows, 0);
+			term_pos(term_rows, 0);
 			if (quit_state > 0 || (quit_state < -256 && quit_state >= -512))
 				restore(quit_state)
 			else if (quit_state < -512)
@@ -1025,8 +1025,8 @@ s64 led_input(sbuf *sb, char *post, s64 postn, s64 row, s64 flg, s64 *pren,
 		led_printparts(sb, -1, ps, "", 0, &cursor_off);
 		if (led_lw) {
 			led_row += led_rowh;
-			if (led_row >= xrows) {	/* scroll the finished lines up */
-				n = led_row - xrows + 1;
+			if (led_row >= term_rows) {	/* scroll the finished lines up */
+				n = led_row - term_rows + 1;
 				term_pos(0, 0);
 				term_room(-n);
 				led_row -= n;

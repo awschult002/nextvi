@@ -4,10 +4,10 @@ sbuf *term_sbuf;
 s64 term_record;
 s64 term_winch;
 s64 term_resized;
-s64 xrows, xcols;
-u64 tibuf_pos, tibuf_cnt, tibuf_sz = 128, ticmd_pos;
-unsigned char *tibuf, ticmd[4096];
-u64 texec, texec_n;
+s64 term_rows, term_cols;
+u64 term_inbuf_pos, term_inbuf_count, term_inbuf_size = 128, term_cmd_keys_pos;
+unsigned char *term_inbuf, term_cmd_keys[4096];
+u64 term_exec_type, term_exec_pushed;
 
 void term_init(void)
 {
@@ -22,16 +22,16 @@ void term_init(void)
 	newtermios.c_lflag &= ~(ICANON | ISIG | ECHO);
 	tcsetattr(term_ufd.fd, TCSAFLUSH, &newtermios);
 	if (!ioctl(term_ufd.fd, TIOCGWINSZ, &win)) {
-		xcols = win.ws_col;
-		xrows = win.ws_row;
+		term_cols = win.ws_col;
+		term_rows = win.ws_row;
 	} else {
 		if ((s = getenv("LINES")))
-			xrows = atoi(s);
+			term_rows = atoi(s);
 		if ((s = getenv("COLUMNS")))
-			xcols = atoi(s);
+			term_cols = atoi(s);
 	}
-	xcols = xcols ? xcols : 80;
-	xrows = xrows ? xrows : 25;
+	term_cols = term_cols ? term_cols : 80;
+	term_rows = term_rows ? term_rows : 25;
 }
 
 void term_done(void)
@@ -118,46 +118,46 @@ void term_pos(s64 r, s64 c)
 /* read s before reading from the terminal */
 void term_push(char *s, u64 n)
 {
-	static u64 tibuf_prev;
-	if (tibuf_cnt + n >= tibuf_sz || tibuf_sz - (tibuf_cnt + n) > 128) {
-		tibuf_sz = tibuf_cnt + n + 128;
-		tibuf = erealloc(tibuf, tibuf_sz);
+	static u64 term_inbuf_prev;
+	if (term_inbuf_count + n >= term_inbuf_size || term_inbuf_size - (term_inbuf_count + n) > 128) {
+		term_inbuf_size = term_inbuf_count + n + 128;
+		term_inbuf = erealloc(term_inbuf, term_inbuf_size);
 	}
-	if (texec) {
-		if (texec == '@' && quit_state > 0) {
+	if (term_exec_type) {
+		if (term_exec_type == '@' && quit_state > 0) {
 			quit_state = 0;
-			texec_n = 0;
-		} else if (tibuf_prev != tibuf_pos)
-			texec_n = 0;
-		memmove(tibuf + tibuf_pos + n + texec_n,
-			tibuf + tibuf_pos + texec_n,
-			tibuf_cnt - tibuf_pos - texec_n);
-		memcpy(tibuf + tibuf_pos + texec_n, s, n);
-		texec_n += n;
-		tibuf_prev = tibuf_pos;
+			term_exec_pushed = 0;
+		} else if (term_inbuf_prev != term_inbuf_pos)
+			term_exec_pushed = 0;
+		memmove(term_inbuf + term_inbuf_pos + n + term_exec_pushed,
+			term_inbuf + term_inbuf_pos + term_exec_pushed,
+			term_inbuf_count - term_inbuf_pos - term_exec_pushed);
+		memcpy(term_inbuf + term_inbuf_pos + term_exec_pushed, s, n);
+		term_exec_pushed += n;
+		term_inbuf_prev = term_inbuf_pos;
 	} else
-		memcpy(tibuf + tibuf_cnt, s, n);
-	tibuf_cnt += n;
+		memcpy(term_inbuf + term_inbuf_count, s, n);
+	term_inbuf_count += n;
 }
 
 s64 term_read(s64 winch)
 {
 	static struct pollfd ufd[1 + LSP_NFDS_MAX];
 	s64 cw, i, nfds;
-	if (tibuf_pos >= tibuf_cnt) {
-		if (texec) {
+	if (term_inbuf_pos >= term_inbuf_count) {
+		if (term_exec_type) {
 			quit_state = !quit_state ? 1 : quit_state;
-			if (texec == '&')
+			if (term_exec_type == '&')
 				goto err;
 		}
 		if (agent_tool) {
 			agent_input_blocked = 1;
 			quit_state = !quit_state ? 1 : quit_state;
-			*tibuf = TK_CTL('c');
+			*term_inbuf = TK_CTL('c');
 			goto ret;
 		}
 		if (term_winch && winch) {
-			*tibuf = winch;	/* yield until term_winch is cleared */
+			*term_inbuf = winch;	/* yield until term_winch is cleared */
 			goto ret;
 		}
 		cw = 0;
@@ -180,17 +180,17 @@ s64 term_read(s64 winch)
 			 * fails and the usual end of input handling takes over */
 			if (!(ufd[0].revents & (POLLIN | POLLHUP | POLLERR))) {
 				if (term_winch && winch) {
-					*tibuf = winch;
+					*term_inbuf = winch;
 					goto ret;
 				}
 				if (lsp_dirty && lsp_wake)
 					goto err;	/* yield so vi redraws diagnostics */
 				goto re;
 			}
-			if (read(term_ufd.fd, tibuf, 1) > 0) {
+			if (read(term_ufd.fd, term_inbuf, 1) > 0) {
 				if (opt_record_reg > 0) {
 					static char buf[2];
-					buf[0] = *tibuf;
+					buf[0] = *term_inbuf;
 					ex_regput(opt_record_reg, buf, 1);
 				}
 				goto ret;
@@ -198,22 +198,22 @@ s64 term_read(s64 winch)
 		}
 		quit_state = !isatty(term_ufd.fd) ? -1 : quit_state;
 		if (term_winch && winch && quit_state >= 0) {
-			*tibuf = winch;
+			*term_inbuf = winch;
 			goto ret;
 		} else if (term_winch != cw && !winch && quit_state >= 0) {
 			cw = term_winch;
 			goto re;
 		}
 		err:
-		*tibuf = 0;
+		*term_inbuf = 0;
 		ret:
-		tibuf_cnt = 1;
-		tibuf_pos = 0;
+		term_inbuf_count = 1;
+		term_inbuf_pos = 0;
 	}
 	vi_rendwait();		/* the queued frame overlaps the read above */
-	if (ticmd_pos < sizeof(ticmd))
-		ticmd[ticmd_pos++] = tibuf[tibuf_pos];
-	return tibuf[tibuf_pos++];
+	if (term_cmd_keys_pos < sizeof(term_cmd_keys))
+		term_cmd_keys[term_cmd_keys_pos++] = term_inbuf[term_inbuf_pos];
+	return term_inbuf[term_inbuf_pos++];
 }
 
 /* return a static string that changes text attributes to att */

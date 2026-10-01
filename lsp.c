@@ -1155,7 +1155,7 @@ void lsp_definition(const char *path, s64 row, s64 off)
 	if (cursor_row < 0)
 		cursor_row = 0;
 	cursor_off = 0;
-	view_top_row = cursor_row > xrows / 2 ? cursor_row - xrows / 2 : 0;
+	view_top_row = cursor_row > term_rows / 2 ? cursor_row - term_rows / 2 : 0;
 }
 
 const char *lsp_diag_for_line(const char *path, s64 line, s64 *sev)

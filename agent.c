@@ -363,7 +363,7 @@ static s64 agent_boundary(void)
 	if (agent_input_blocked)
 		return 1;
 	preserve(s64, agent_tool, agent_tool = 0;)
-	while (tibuf_pos < tibuf_cnt)
+	while (term_inbuf_pos < term_inbuf_count)
 		agent_key(term_read(0));
 	while (poll(&term_ufd, 1, 0) > 0 && term_ufd.revents & POLLIN)
 		agent_key(term_read(0));
@@ -778,9 +778,9 @@ static void agent_resize(void)
 	struct winsize win;
 	if (!ioctl(term_ufd.fd, TIOCGWINSZ, &win)) {
 		if (win.ws_col)
-			xcols = win.ws_col;
+			term_cols = win.ws_col;
 		if (win.ws_row)
-			xrows = win.ws_row;
+			term_rows = win.ws_row;
 	}
 	term_winch = 0;
 	term_resized++;
@@ -795,7 +795,7 @@ static void agent_redraw(const char *draft)
 	if (draft)
 		sbuf_str(sb, draft);
 	sbuf_nul(sb)
-	s64 cap = MAX(2, xrows), *starts = emalloc(sizeof(s64) * cap);
+	s64 cap = MAX(2, term_rows), *starts = emalloc(sizeof(s64) * cap);
 	s64 rows = 1, col = 0;
 	starts[0] = 0;
 	for (s64 i = 0; i < sb->s_n; ) {
@@ -804,12 +804,12 @@ static void agent_redraw(const char *draft)
 		uc_code(code, s, n)
 		col += *s == '\t' ? 8 - col % 8 : MAX(0, uc_wid(code));
 		i += MAX(1, n);
-		if (newline || col >= MAX(1, xcols)) {
+		if (newline || col >= MAX(1, term_cols)) {
 			starts[rows++ % cap] = i;
 			col = 0;
 		}
 	}
-	s64 start = starts[MAX(0, rows - MAX(1, xrows-2)) % cap];
+	s64 start = starts[MAX(0, rows - MAX(1, term_rows-2)) % cap];
 	term_clean();
 	agent_output(sb->s + start);
 	free(starts);

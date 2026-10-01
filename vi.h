@@ -381,10 +381,10 @@ extern sbuf *term_sbuf;
 extern s64 term_record;
 extern s64 term_winch;
 extern s64 term_resized;
-extern s64 xrows, xcols;
-extern u64 tibuf_pos, tibuf_cnt, tibuf_sz, ticmd_pos;
-extern unsigned char *tibuf, ticmd[4096];
-extern u64 texec, texec_n;
+extern s64 term_rows, term_cols;
+extern u64 term_inbuf_pos, term_inbuf_count, term_inbuf_size, term_cmd_keys_pos;
+extern unsigned char *term_inbuf, term_cmd_keys[4096];
+extern u64 term_exec_type, term_exec_pushed;
 #define term_write(s, n) if (opt_line_editor) write(1, s, n);
 void term_init(void);
 void term_done(void);
@@ -400,21 +400,21 @@ s64 term_read(s64 winch);
 void term_commit(void);
 char *term_att(s64 att);
 void term_push(char *s, u64 n);
-#define term_dec() tibuf_pos--; ticmd_pos--;
+#define term_dec() term_inbuf_pos--; term_cmd_keys_pos--;
 #define term_exec(s, n, type) \
 { \
-	preserve(s64, texec_n, texec_n = 0;) \
-	preserve(s64, tibuf_cnt,) \
-	preserve(s64, tibuf_pos, tibuf_pos = tibuf_cnt;) \
+	preserve(s64, term_exec_pushed, term_exec_pushed = 0;) \
+	preserve(s64, term_inbuf_count,) \
+	preserve(s64, term_inbuf_pos, term_inbuf_pos = term_inbuf_count;) \
 	term_push(s, n); \
-	preserve(s64, texec, texec = type;) \
+	preserve(s64, term_exec_type, term_exec_type = type;) \
 	vi(0); \
-	restore(texec) \
+	restore(term_exec_type) \
 	if (quit_state > 0) \
 		quit_state = 0; \
-	restore(tibuf_pos) \
-	restore(tibuf_cnt) \
-	restore(texec_n) \
+	restore(term_inbuf_pos) \
+	restore(term_inbuf_count) \
+	restore(term_exec_pushed) \
 } \
 
 /* process management */
@@ -492,8 +492,8 @@ static void led_preview_current(char *text, s64 ps, s64 lncol);
 static s64 ts_preview_row(s64 ps);
 #define ts_winy 0
 #define ts_winx 0
-#define ts_winh xrows
-#define ts_winw xcols
+#define ts_winh term_rows
+#define ts_winw term_cols
 #define led_srender(msg, sr, sc, beg, end, view, row, col) \
 { \
 	s64 record = term_record; \

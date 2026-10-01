@@ -584,7 +584,7 @@ static void *ec_fuzz(char *loc, char *cmd, char *arg)
 			return *loc ? xrerr : xirerr;
 		}
 		beg = 0;
-		max = xrows ? xrows * 3 : end;
+		max = term_rows ? term_rows * 3 : end;
 	}
 	snprintf(trunc, sizeof(trunc), "truncated to %ld lines", max);
 	dwid1 = itoalen(max - 1);
@@ -647,7 +647,7 @@ static void *ec_fuzz(char *loc, char *cmd, char *arg)
 		sbuf_cut(sb, 0)
 		if (pflg) {
 			term_clean();
-			term_pos(xrows, 0);
+			term_pos(term_rows, 0);
 		} else if (c)
 			ex_print("", NULL)
 	}
@@ -1008,7 +1008,7 @@ void ex_cprint(char *line, char *ft, s64 r, s64 c, s64 left, s64 flg)
 	}
 	syn_blockhl = -1;
 	if (flg && !(opt_startup_flags & 2)) {
-		term_pos(xrows, 0);
+		term_pos(term_rows, 0);
 		if ((!print_newline && opt_multiline_prompt > 0) || flg == 2)
 			term_chr('\n');
 		opt_multiline_prompt += opt_multiline_prompt >= 0 && flg == 1;
@@ -1017,7 +1017,7 @@ void ex_cprint(char *line, char *ft, s64 r, s64 c, s64 left, s64 flg)
 	preserve(s64, ftidx,)
 	if (ft)
 		syn_setft(ft);
-	led_crender(line, r, c, left, left + xcols - c)
+	led_crender(line, r, c, left, left + term_cols - c)
 	restore(ftidx)
 	if (flg && opt_startup_flags & 2)
 		term_chr('\n');
@@ -2239,7 +2239,7 @@ _EO(hlr,
 
 _EO(left,
 	if (*loc)
-		opt_left_col = (xcols / 2) * atoi(loc);
+		opt_left_col = (term_cols / 2) * atoi(loc);
 	else if (*arg)
 		opt_left_col = atoi(arg);
 	else if (lbuf_get(xb, cursor_row))
@@ -2579,7 +2579,7 @@ void ex(void)
 {
 	vi_ex_depth++;
 	s64 esc = 0;
-	sbuf_smake(sb, xcols)
+	sbuf_smake(sb, term_cols)
 	while (!quit_state) {
 		syn_setft(ex_ft);
 		if (ex_read(sb, ":", NULL, 0, 1) == '\n') {

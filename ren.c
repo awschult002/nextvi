@@ -88,7 +88,7 @@ static s64 ren_cwid(char *s, s64 pos)
 /* the number of columns a wrapped segment holds */
 s64 ren_wrapw(s64 lncol)
 {
-	s64 w = MIN(xlw, xcols) - lncol;
+	s64 w = MIN(xlw, term_cols) - lncol;
 	return w > 0 ? w : 1;
 }
 
@@ -306,7 +306,7 @@ char *syn_setft(char *ft)
 
 void syn_scdir(s64 scdir)
 {
-	if (!scdir || labs(scdir) > xrows || (syn_scdirl > 0) != (scdir > 0)) {
+	if (!scdir || labs(scdir) > term_rows || (syn_scdirl > 0) != (scdir > 0)) {
 		syn_scdirl = scdir;
 		syn_blockhl = -1;
 		blockdep = 0;

@@ -435,7 +435,7 @@ static s64 ts_preview_row(s64 ps)
 
 static void led_preview_current(char *text, s64 ps, s64 lncol)
 {
-	led_srender(text, -1, lncol, opt_left_col, opt_left_col + xcols - lncol,
+	led_srender(text, -1, lncol, opt_left_col, opt_left_col + term_cols - lncol,
 		ts_preview, ts_preview_row(ps), 0)
 }
 
@@ -479,7 +479,7 @@ static void led_preview_draw(s64 ps)
 		return;
 	}
 	preserve(ren_state*, rstate, rstate = rstates + 1;)
-	for (s64 row = view_top_row; row < view_top_row + xrows; row++) {
+	for (s64 row = view_top_row; row < view_top_row + term_rows; row++) {
 		if (row == current)
 			continue;
 		char *line = ts_line(ts_preview, row);
@@ -489,13 +489,13 @@ static void led_preview_draw(s64 ps)
 			char *copy = emalloc(len + 4);
 			memcpy(copy, line, len);
 			memset(copy + len, 0, 4);
-			led_srender(copy, row - view_top_row, vi_lncol, opt_left_col, opt_left_col + xcols - vi_lncol,
+			led_srender(copy, row - view_top_row, vi_lncol, opt_left_col, opt_left_col + term_cols - vi_lncol,
 				ts_preview, row, 0)
 			rstate->s = NULL;
 			free(copy);
 		} else
 			led_srender(line ? line : "~", row - view_top_row, vi_lncol, opt_left_col,
-				opt_left_col + xcols - vi_lncol, ts_preview, row, 0)
+				opt_left_col + term_cols - vi_lncol, ts_preview, row, 0)
 	}
 	term_pos(current - view_top_row, vi_lncol);
 	restore(rstate)
