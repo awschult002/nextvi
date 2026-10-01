@@ -75,6 +75,8 @@ The `64bit` edits in `lsp.c`, `jsmn.h`, `treesitter.c`, `agent.c` and `term.c` w
 - `agent` with a real endpoint
 - threaded redraw under load (threads share every global in the unity build, so watch for data races)
 
-## Available but not applied
+## Declined
 
-`key_remap_cmds` adds `:im`, `:im!`, `:nm` and `:nm!` to map or unmap single keys per keymap at runtime, via a new `map_read()`. On top of the 16 its code applies cleanly and builds, but its conf.c highlight edit needs the same merge fix as above. Keys read inside other patches (for example tab-complete's loop) aren't remapped.
+Alex decided against `key_remap_cmds` (2026-09-30). Key bindings stay in source, in the key switch in `vi.c`.
+
+For reference: `key_remap_cmds` adds `:im`, `:im!`, `:nm` and `:nm!` to map or unmap single keys per keymap at runtime, via a new `map_read()`. On top of the 16 its code applies cleanly and builds, but its conf.c highlight edit needs the same merge fix as above. Keys read inside other patches (for example tab-complete's loop) aren't remapped.
