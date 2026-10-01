@@ -700,7 +700,7 @@ char *conf_digraph(s64 c1, s64 c2);
 void vi(s64 init);
 void vi_rendwait(void);
 extern s64 vi_hidch;
-extern s64 vi_lncol;
+extern s64 lnum_width;
 /* soft line wrap geometry */
 s64 vi_lnrows(char *s);
 s64 vi_srow(s64 row);

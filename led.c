@@ -453,7 +453,7 @@ static void led_printparts(sbuf *sb, s64 pre, s64 ps,
 		return;
 	}
 	s64 dir, off, pos, psn = sb->s_n;
-	s64 lncol = poff == &cursor_off ? vi_lncol : 0;
+	s64 lncol = poff == &cursor_off ? lnum_width : 0;
 	sbuf_str(sb, post)
 	sbuf_nul4(sb)
 	if (ts_preview && poff == &cursor_off) {
@@ -611,7 +611,7 @@ static void led_redraw(char *cs, s64 r, s64 orow, s64 crow, s64 ctop, s64 flg)
 	}
 	rstate++;
 	for (s64 nl = 0; r < term_rows; r++) {
-		if (vi_lncol) {
+		if (lnum_width) {
 			term_pos(r, 0);
 			term_kill();
 		}
@@ -621,7 +621,7 @@ static void led_redraw(char *cs, s64 r, s64 orow, s64 crow, s64 ctop, s64 flg)
 			sbuf_mem(cb, cs, nl+!!cs[nl])
 			sbuf_nul4(cb)
 			rstate->s = NULL;
-			led_crender(cb->s, r, vi_lncol, opt_left_col, opt_left_col + term_cols - vi_lncol)
+			led_crender(cb->s, r, lnum_width, opt_left_col, opt_left_col + term_cols - lnum_width)
 			free(cb->s);
 			rstate->s = NULL;
 			cs += nl+!!cs[nl];
@@ -629,7 +629,7 @@ static void led_redraw(char *cs, s64 r, s64 orow, s64 crow, s64 ctop, s64 flg)
 		}
 		nl = r < crow-ctop ? r+ctop : (r-(crow-orow+!!(flg & 4)))+ctop;
 		led_crender(lbuf_get(xb, nl) ? lbuf_get(xb, nl) : "~", r,
-			vi_lncol, opt_left_col, opt_left_col + term_cols - vi_lncol)
+			lnum_width, opt_left_col, opt_left_col + term_cols - lnum_width)
 	}
 	term_pos(crow - ctop, 0);
 	rstate--;

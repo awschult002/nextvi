@@ -447,10 +447,10 @@ static s64 led_preview_height(s64 row, s64 trow, s64 paint)
 	char *copy = emalloc(len + 4);
 	memcpy(copy, line ? line : "~", len);
 	memset(copy + len, 0, 4);
-	s64 w = ren_wrapw(vi_lncol), h = MAX(0, ren_position(copy)->cmax) / w + 1;
+	s64 w = ren_wrapw(lnum_width), h = MAX(0, ren_position(copy)->cmax) / w + 1;
 	if (paint)
 		for (s64 k = MAX(0, -trow); k < h && trow + k < ts_winh; k++)
-			led_srender(copy, ts_winy + trow + k, ts_winx + vi_lncol, k * w, k * w + w,
+			led_srender(copy, ts_winy + trow + k, ts_winx + lnum_width, k * w, k * w + w,
 				ts_preview, row, 0)
 	rstate->s = NULL;
 	free(copy);
@@ -489,15 +489,15 @@ static void led_preview_draw(s64 ps)
 			char *copy = emalloc(len + 4);
 			memcpy(copy, line, len);
 			memset(copy + len, 0, 4);
-			led_srender(copy, row - view_top_row, vi_lncol, opt_left_col, opt_left_col + term_cols - vi_lncol,
+			led_srender(copy, row - view_top_row, lnum_width, opt_left_col, opt_left_col + term_cols - lnum_width,
 				ts_preview, row, 0)
 			rstate->s = NULL;
 			free(copy);
 		} else
-			led_srender(line ? line : "~", row - view_top_row, vi_lncol, opt_left_col,
-				opt_left_col + term_cols - vi_lncol, ts_preview, row, 0)
+			led_srender(line ? line : "~", row - view_top_row, lnum_width, opt_left_col,
+				opt_left_col + term_cols - lnum_width, ts_preview, row, 0)
 	}
-	term_pos(current - view_top_row, vi_lncol);
+	term_pos(current - view_top_row, lnum_width);
 	restore(rstate)
 }
 
