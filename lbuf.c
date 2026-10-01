@@ -1,3 +1,14 @@
+/**
+ * @file lbuf.c
+ * @brief Line buffer: stores the file as an array of lines, with marks and
+ * undo/redo history, plus the motions that walk it (words, pairs, search).
+ *
+ * Each line is one allocation: [struct linfo][text]['\n'][4 NULs]. Lines are
+ * handled as pointers to the text; lbuf_s()/lbuf_i() step back to the linfo
+ * header. Positions are (row, off) with off a character index.
+ */
+
+/** @brief Allocate an empty line buffer. */
 struct lbuf *lbuf_make(void)
 {
 	struct lbuf *lb = emalloc(sizeof(*lb));
@@ -7,6 +18,7 @@ struct lbuf *lbuf_make(void)
 	return lb;
 }
 
+/** @brief Free a line, invalidating render caches (rstates[0..1]) that point at it. */
 static void lbuf_rfree(char *ln)
 {
 	for (s64 i = 0; i < 2; i++)
@@ -15,6 +27,10 @@ static void lbuf_rfree(char *ln)
 	free(lbuf_s(ln));
 }
 
+/**
+ * @brief Free an undo record. Its lines are freed only if they are not in the
+ * buffer: ref bit 2 means ins[] is live, bit 1 means del[] is live.
+ */
 static void lopt_done(struct lopt *lo)
 {
 	free(lo->mark);
@@ -28,9 +44,10 @@ static void lopt_done(struct lopt *lo)
 	free(lo->del);
 }
 
+/* copy a (row, off) mark pair */
 #define lbuf_copymark(dst, src) { dst[0] = src[0]; dst[1] = src[1]; }
 
-/* find a mark id, returning its row & off pair */
+/** @brief Find a mark id in an {id, row, off} triplet array, returning its row & off pair. */
 static s64 *mark_find(s64 *mark, s64 n, s64 id)
 {
 	for (s64 i = 0; i < n * 3; i += 3)
@@ -39,6 +56,7 @@ static s64 *mark_find(s64 *mark, s64 n, s64 id)
 	return NULL;
 }
 
+/** @brief Set mark id, appending a triplet if it is new. */
 static void mark_set(s64 **mark, s64 *n, s64 id, s64 pos, s64 off)
 {
 	s64 *m = mark_find(*mark, *n, id);
@@ -52,6 +70,7 @@ static void mark_set(s64 **mark, s64 *n, s64 id, s64 pos, s64 off)
 	m[1] = off;
 }
 
+/** @brief Set mark mk; ' is an alias of `, [ and ] have their own slots. */
 void lbuf_mark(struct lbuf *lb, s64 mk, s64 pos, s64 off)
 {
 	if (mk == '\'')
@@ -66,6 +85,7 @@ void lbuf_mark(struct lbuf *lb, s64 mk, s64 pos, s64 off)
 		mark_set(&lb->mark, &lb->mark_n, mk, pos, off);
 }
 
+/** @brief Get the position of mark mk; returns 1 if it is unset. */
 s64 lbuf_jump(struct lbuf *lb, s64 mk, s64 *pos, s64 *off)
 {
 	s64 *m;
@@ -84,6 +104,7 @@ s64 lbuf_jump(struct lbuf *lb, s64 mk, s64 *pos, s64 *off)
 	return 0;
 }
 
+/** @brief Free the buffer, its lines and its history. */
 void lbuf_free(struct lbuf *lb)
 {
 	ts_forget(lb);
@@ -98,13 +119,19 @@ void lbuf_free(struct lbuf *lb)
 	free(lb);
 }
 
+/** @brief Bytes of the first line of s, including its '\n'. */
 static s64 linelength(char *s)
 {
 	s64 len = dstrlen(s, '\n');
 	return s[len] == '\n' ? len + 1 : len;
 }
 
-/* low-level line replacement */
+/**
+ * @brief Low-level line replacement: replace n_del rows at lo->pos with n_ins rows.
+ * @param s   text to split into new lines (appended to sb as pointers),
+ *            or NULL if sb->s already holds n_ins line pointers (undo/redo)
+ * @return the number of inserted lines
+ */
 static s64 lbuf_replace(struct lbuf *lb, sbuf *sb, char *s, struct lopt *lo, s64 n_del, s64 n_ins)
 {
 	s64 i, pos = lo->pos;
@@ -112,6 +139,7 @@ static s64 lbuf_replace(struct lbuf *lb, sbuf *sb, char *s, struct lopt *lo, s64
 		for (; *s; n_ins++) {
 			s64 l = linelength(s);
 			s64 l_nonl = l - (s[l - !!l] == '\n');
+			/* header + text + '\n' + 4 NUL pad; ln points just after the header */
 			struct linfo *n = emalloc(l_nonl + 5 + sizeof(struct linfo));
 			n->len = l_nonl;
 			n->grec = 0;
@@ -140,6 +168,8 @@ static s64 lbuf_replace(struct lbuf *lb, sbuf *sb, char *s, struct lopt *lo, s64
 	lb->edseq++;
 	for (i = 0; i < n_ins; i++)
 		lb->ln[pos + i] = *((char**)sb->s + i);
+	/* m = {id, row, off}: marks on deleted rows are saved in lo and moved to the
+	 * last new row; marks below shift; marks saved in lo are restored (undo) */
 	for (i = 0; i < lb->mark_n; i++) {	/* updating marks */
 		s64 *m = lb->mark + i * 3, *lm;
 		if (m[1] >= pos + n_ins && m[1] < pos + n_del) {
@@ -153,6 +183,7 @@ static s64 lbuf_replace(struct lbuf *lb, sbuf *sb, char *s, struct lopt *lo, s64
 	return n_ins;
 }
 
+/** @brief Set the [ mark (change start), saving the old one in lo. */
 void lbuf_smark(struct lbuf *lb, struct lopt *lo, s64 beg, s64 o1)
 {
 	lbuf_copymark(lo->mark_sb, lb->mark_sb)
@@ -160,6 +191,7 @@ void lbuf_smark(struct lbuf *lb, struct lopt *lo, s64 beg, s64 o1)
 	lb->mark_sb[1] = o1;
 }
 
+/** @brief Set the ] mark (change end), saving the old one in lo; frees lo if history is off. */
 void lbuf_emark(struct lbuf *lb, struct lopt *lo, s64 end, s64 o2)
 {
 	lbuf_copymark(lo->mark_se, lb->mark_se)
@@ -169,7 +201,11 @@ void lbuf_emark(struct lbuf *lb, struct lopt *lo, s64 end, s64 o2)
 		lopt_done(lo);
 }
 
-/* append undo/redo history */
+/**
+ * @brief Append an undo/redo history record, discarding any redo entries.
+ * It remembers the n_del rows from beg that are about to be replaced.
+ * With opt_undo_seq < 0 a static scratch record is used.
+ */
 struct lopt *lbuf_opt(struct lbuf *lb, s64 beg, s64 o1, s64 n_del)
 {
 	struct lopt *lo;
@@ -208,7 +244,11 @@ struct lopt *lbuf_opt(struct lbuf *lb, s64 beg, s64 o1, s64 n_del)
 	return lo;
 }
 
-/* replace lines beg through end with buf */
+/**
+ * @brief Replace rows [beg, end) with buf, recording undo history.
+ * @param buf     new text (lines end with '\n'), NULL only deletes
+ * @param o1,o2   character offsets stored as the [ and ] marks
+ */
 void lbuf_edit(struct lbuf *lb, char *buf, s64 beg, s64 end, s64 o1, s64 o2)
 {
 	if (beg > lb->ln_n)
@@ -240,6 +280,7 @@ void lbuf_edit(struct lbuf *lb, char *buf, s64 beg, s64 end, s64 o1, s64 o2)
 	agent_sync(lb);
 }
 
+/** @brief Read all of fd and replace rows [beg, end) with it; nonzero on read error. */
 s64 lbuf_rd(struct lbuf *lb, s64 fd, s64 beg, s64 end)
 {
 	struct stat st;
@@ -247,6 +288,7 @@ s64 lbuf_rd(struct lbuf *lb, s64 fd, s64 beg, s64 end)
 	s64 sz = 1048575, step = 1, n = 0;
 	if (fstat(fd, &st) >= 0 && S_ISREG(st.st_mode) && st.st_size)
 		sz = st.st_size >= INT64_MAX ? INT64_MAX : st.st_size + step;
+	/* sz is the usable size, one byte is kept for the NUL */
 	char *s = emalloc(sz--);
 	while ((nr = read(fd, s + n, sz - n)) > 0) {
 		n += nr;
@@ -269,6 +311,7 @@ s64 lbuf_rd(struct lbuf *lb, s64 fd, s64 beg, s64 end)
 	return nr != 0;
 }
 
+/** @brief Write rows [beg, end) to fd; negative on error. */
 s64 lbuf_wr(struct lbuf *lb, s64 fd, s64 beg, s64 end)
 {
 	for (s64 i = beg; i < end; i++) {
@@ -285,12 +328,18 @@ s64 lbuf_wr(struct lbuf *lb, s64 fd, s64 beg, s64 end)
 	return 0;
 }
 
+/**
+ * @brief Copy the text from (r1, o1) up to (r2, o2) into a newly made sb.
+ * r2 is inclusive; o2 < 0 takes all of r2 including '\n'; when r1 == r2 and
+ * o2 < o1 the copy runs to the line end.
+ */
 void lbuf_region(struct lbuf *lb, sbuf *sb, s64 r1, s64 o1, s64 r2, s64 o2)
 {
 	char *s1 = lbuf_get(lb, r1), *s2;
 	_sbuf_make(sb, 1024,)
 	r2 = MIN(lb->ln_n, r2);
 	if (s1) {
+		/* send: one past the '\n' of row r1 */
 		char *send = s1 + lbuf_s(s1)->len+1;
 		if (r1 == r2) {
 			s1 = uc_chr(s1, o1);
@@ -314,7 +363,7 @@ void lbuf_region(struct lbuf *lb, sbuf *sb, s64 r1, s64 o1, s64 r2, s64 o2)
 	sbuf_nul4(sb)
 }
 
-/* convert (row, off) position to byte offset within region (r1,o1)-(r2,o2) */
+/** @brief Convert (row, off) position to byte offset within region (r1,o1)-(r2,o2); -1 if outside. */
 s64 lbuf_pos2off(struct lbuf *lb, s64 r1, s64 o1, s64 r2, s64 o2, s64 row, s64 off)
 {
 	s64 boff = 0, sub;
@@ -325,6 +374,7 @@ s64 lbuf_pos2off(struct lbuf *lb, s64 r1, s64 o1, s64 r2, s64 o2, s64 row, s64 o
 		if (i == row) {
 			if ((i == r1 && off < o1) || (o2 >= 0 && i == r2 && off > o2))
 				return -1;
+			/* sub: byte offset of o1 in r1; the result counts bytes from (r1, o1) */
 			sub = uc_chr(lb->ln[r1], o1) - lb->ln[r1];
 			boff -= boff ? sub : 0;
 			if (i != r1)
@@ -337,12 +387,13 @@ s64 lbuf_pos2off(struct lbuf *lb, s64 r1, s64 o1, s64 r2, s64 o2, s64 row, s64 o
 	return -1;
 }
 
-/* convert byte offset within region (r1,o1)-(r2,o2) to (row, off) position */
+/** @brief Convert byte offset within region (r1,o1)-(r2,o2) to (row, off) position; nonzero if outside. */
 s64 lbuf_off2pos(struct lbuf *lb, s64 r1, s64 o1, s64 r2, s64 o2, s64 boff, s64 *row, s64 *off)
 {
 	char *ln = lbuf_get(lb, r1);
 	if (!ln)
 		return 1;
+	/* acc: bytes from (r1, o1) to the end of row i */
 	s64 acc = -(uc_chr(ln, o1) - ln);
 	for (s64 i = r1; ln && i <= r2; ln = lbuf_get(lb, ++i)) {
 		acc += lbuf_i(lb, i)->len + 1;
@@ -355,6 +406,12 @@ s64 lbuf_off2pos(struct lbuf *lb, s64 r1, s64 o1, s64 r2, s64 o2, s64 boff, s64 
 	return 1;
 }
 
+/**
+ * @brief Build r1's text before char *o1, then i, then r2's text from char *o2.
+ * For r1 == r2, *o2 == -2 drops the rest of the line and *o2 <= *o1 deletes nothing.
+ * *o1 (and *o2 if r1 != r2) are clamped to the line length.
+ * @return malloc'd result (with the 4-NUL pad)
+ */
 char *lbuf_joinsb(struct lbuf *lb, s64 r1, s64 r2, sbuf *i, s64 *o1, s64 *o2)
 {
 	char *s = lbuf_get(lb, r1), *e, *se, *p;
@@ -375,6 +432,7 @@ char *lbuf_joinsb(struct lbuf *lb, s64 r1, s64 r2, sbuf *i, s64 *o1, s64 *o2)
 		se = uc_chrn(es, *o2, o2);
 		endsz = (e - s) + (lbuf_s(es)->len + 5 - (se - es));
 	}
+	/* e: cut point in r1, se: resume point in r2, endsz: bytes before e plus bytes from se through the pad */
 	p = emalloc(endsz + i->s_n);
 	memcpy(p, s, e - s);
 	memcpy(p + (e - s), i->s, i->s_n);
@@ -382,6 +440,11 @@ char *lbuf_joinsb(struct lbuf *lb, s64 r1, s64 r2, sbuf *i, s64 *o1, s64 *o2)
 	return p;
 }
 
+/**
+ * @brief Join rows [beg, end), stripping leading blanks of joined lines.
+ * @param flg  insert a space between lines (not before ')')
+ * @param[out] o2  cursor offset at the last join point
+ */
 s64 lbuf_join(struct lbuf *lb, s64 beg, s64 end, s64 o1, s64 *o2, s64 flg)
 {
 	if (!lbuf_get(lb, beg) || !lbuf_get(lb, end - 1))
@@ -408,11 +471,13 @@ s64 lbuf_join(struct lbuf *lb, s64 beg, s64 end, s64 o1, s64 *o2, s64 flg)
 	return 0;
 }
 
+/** @brief Row pos, or NULL if out of range. */
 char *lbuf_get(struct lbuf *lb, s64 pos)
 {
 	return pos >= 0 && pos < lb->ln_n ? lb->ln[pos] : NULL;
 }
 
+/** @brief Undo all history records of the latest sequence; returns 1 if none. */
 s64 lbuf_undo(struct lbuf *lb, s64 *row, s64 *off)
 {
 	if (!lb->hist_u)
@@ -439,6 +504,7 @@ s64 lbuf_undo(struct lbuf *lb, s64 *row, s64 *off)
 	return 0;
 }
 
+/** @brief Redo all history records of the next sequence; returns 1 if none. */
 s64 lbuf_redo(struct lbuf *lb, s64 *row, s64 *off)
 {
 	if (lb->hist_u == lb->hist_n)
@@ -467,7 +533,7 @@ s64 lbuf_redo(struct lbuf *lb, s64 *row, s64 *off)
 	return 0;
 }
 
-/* mark buffer as saved and, if clear, clear the undo history */
+/** @brief Mark buffer as saved and, if clear, clear the undo history. */
 void lbuf_saved(struct lbuf *lb, s64 clear)
 {
 	if (clear) {
@@ -480,6 +546,7 @@ void lbuf_saved(struct lbuf *lb, s64 clear)
 	lb->saved = lb->hist_u;
 }
 
+/** @brief Number of leading blank chars of row r; for a blank line, the offset of the char before its '\n' (-1 if empty). */
 s64 lbuf_indents(struct lbuf *lb, s64 r)
 {
 	char *ln = lbuf_get(lb, r);
@@ -491,6 +558,7 @@ s64 lbuf_indents(struct lbuf *lb, s64 r)
 	return *ln ? o : o - 2;
 }
 
+/** @brief f/t/F/T: move to the n-th cs in the row; returns nonzero if not found. */
 s64 lbuf_findchar(struct lbuf *lb, char *cs, s64 cmd, s64 n, s64 *row, s64 *off)
 {
 	char *ln = lbuf_get(lb, *row);
@@ -537,6 +605,9 @@ static void *lsearch(void *arg)
 		step = 0;
 		flg = REG_NEWLINE;
 		s = a->lb->ln[i];
+		/* off: byte offset where the next search starts; step: byte offset of the
+		 * previous match, _o: its char offset, so uc_off() counts only the new part.
+		 * Backward search keeps the last match of the row. */
 		while (rstr_find(a->re, s + off, offs, flg) >= 0) {
 			flg |= REG_NOTBOL;
 			g1 = offs[opt_search_group], g2 = offs[opt_search_group + 1];
@@ -560,6 +631,15 @@ static void *lsearch(void *arg)
 	return NULL;
 }
 
+/**
+ * @brief Search re from (*r, *o) through rows [beg, end) in direction dir.
+ * The rows are split into up to NUM_THREADS slices searched in parallel by
+ * lsearch(); the first slice in search order with a match wins. While it runs
+ * utf8_length['\n'] is 0 (see re_pikevm()).
+ * @param pskip  start pskip chars after *o on the first row; < 0 from line start
+ * @param nskip  backward: on the first row ignore matches after *o - nskip
+ * @return 0 if found (position in *r, *o)
+ */
 s64 lbuf_search(struct lbuf *lb, rstr *re, s64 dir, s64 beg, s64 end, s64 pskip,
 		s64 nskip, s64 *r, s64 *o)
 {
@@ -627,6 +707,7 @@ s64 lbuf_search(struct lbuf *lb, rstr *re, s64 dir, s64 beg, s64 end, s64 pskip,
 	return 1;
 }
 
+/** @brief Move to the next row starting with ch ('{', or '\n' for paragraph breaks). */
 s64 lbuf_sectionbeg(struct lbuf *lb, s64 dir, s64 *row, s64 *off, s64 ch)
 {
 	if (ch == '\n')
@@ -641,6 +722,10 @@ s64 lbuf_sectionbeg(struct lbuf *lb, s64 dir, s64 *row, s64 *off, s64 ch)
 	return 0;
 }
 
+/**
+ * @brief Offset of the row's '\n', i.e. its character count without the newline.
+ * @param state  nonzero: count via ren_position(); 2: only if rstate already holds row
+ */
 s64 lbuf_eol(struct lbuf *lb, s64 row, s64 state)
 {
 	char *ln = lbuf_get(lb, row);
@@ -652,6 +737,11 @@ s64 lbuf_eol(struct lbuf *lb, s64 row, s64 state)
 	return state < 0 ? 0 : state;
 }
 
+/**
+ * @brief Step one character in dir (+-1 may cross rows, +-2 stays on the row).
+ * Leaves rstate describing the new row.
+ * @return -1 at the edge
+ */
 s64 lbuf_next(struct lbuf *lb, s64 dir, s64 *r, s64 *o)
 {
 	s64 odir = dir > 0 ? 1 : -1;
@@ -674,7 +764,7 @@ s64 lbuf_next(struct lbuf *lb, s64 dir, s64 *r, s64 *o)
 	return 0;
 }
 
-/* move to the last character of the word */
+/** @brief Move to the last character of the word; kind is a uc_kind() mask (3 = any non-blank). */
 static s64 lbuf_wordlast(struct lbuf *lb, s64 kind, s64 dir, s64 *row, s64 *off)
 {
 	if (!kind || !(uc_kind(rstate->chrs[*off]) & kind))
@@ -687,6 +777,7 @@ static s64 lbuf_wordlast(struct lbuf *lb, s64 kind, s64 dir, s64 *row, s64 *off)
 	return 0;
 }
 
+/** @brief w/W: move to the next word start (stops at an empty line); big selects WORDs. */
 s64 lbuf_wordbeg(struct lbuf *lb, s64 big, s64 dir, s64 *row, s64 *off)
 {
 	s64 nl;
@@ -707,6 +798,7 @@ s64 lbuf_wordbeg(struct lbuf *lb, s64 big, s64 dir, s64 *row, s64 *off)
 	return 0;
 }
 
+/** @brief e/E (dir > 0) and b/B (dir < 0) word motions; big selects WORDs. */
 s64 lbuf_wordend(struct lbuf *lb, s64 big, s64 dir, s64 *row, s64 *off)
 {
 	s64 nl = 0;
@@ -733,7 +825,11 @@ s64 lbuf_wordend(struct lbuf *lb, s64 big, s64 dir, s64 *row, s64 *off)
 	return 0;
 }
 
-/* move to the matching character */
+/**
+ * @brief Move to the matching character.
+ * @param pairs  open/close pairs, e.g. "()[]{}"; the first one at or after
+ *               the cursor is used, even index searches forward
+ */
 s64 lbuf_pair(struct lbuf *lb, char *pairs, s64 plen, s64 *row, s64 *off)
 {
 	s64 r = *row, o = *off;
