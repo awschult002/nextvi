@@ -53,6 +53,13 @@ static void vi_rendpost(s64 mod, s64 otop, s64 otopsub, s64 oleft,
 s64 vi_hidch;			/* show hidden chars */
 s64 lnum_width;			/* line numbers cursor offset */
 static s64 lnum_mode;		/* line numbers */
+/** Line-number mode flags for lnum_mode; `[count]#` toggles the flag equal to count, bare `#` = LN_ONCE. */
+enum {
+	LN_ONCE = 1,	///< bare `#`: absolute + relative-at-indent, cleared on the next keypress
+	LN_ABS = 2,	///< `2#`: absolute numbers in the left column
+	LN_INDENT = 4,	///< `4#`: relative number moved to just before the first non-blank character
+	LN_REL = 8,	///< `8#`: relative numbers in the left column
+};
 /* screen redraw - bit 1: whole screen, bit 2: current line, bit 3: update vi_col */
 static s64 vi_mod;
 static char vi_word_m[] = "\0leEwW";	/* line word navigation */
@@ -566,13 +573,13 @@ static s64 vi_drawrow(s64 row, s64 trow)
 	else if (lnum_cur && opt_line_editor) {
 		char tmp[32], tmp1[32], *p;
 		c = tmp, i = 0, i1 = 0;
-		if (lnum_cur == 1 || lnum_cur & 2) {
+		if (lnum_cur == LN_ONCE || lnum_cur & LN_ABS) {
 			c = itoa(row+1-hint_row_shift, tmp);
 			*c++ = ' ';
 			i = itoalen(vi_lnwid);
 		}
 		p = c;
-		if (lnum_cur == 1 || lnum_cur & 4 || lnum_cur & 8) {
+		if (lnum_cur == LN_ONCE || lnum_cur & LN_INDENT || lnum_cur & LN_REL) {
 			c = itoa(labs(cursor_row-row+hint_row_shift), c);
 			*c++ = ' ';
 			i1 = itoalen(term_rows);
@@ -588,7 +595,7 @@ static s64 vi_drawrow(s64 row, s64 trow)
 		preserve(s64, syn_blockhl, syn_blockhl = -1;)
 		preserve(s64, ftidx,)
 		syn_setft(nn_ft);
-		if ((lnum_cur == 1 || lnum_cur & 4) && !opt_left_col && lnum_width) {
+		if ((lnum_cur == LN_ONCE || lnum_cur & LN_INDENT) && !opt_left_col && lnum_width) {
 			for (i1 = 0; i1 < rstate->cmax &&
 					memchr(" \t", *rstate->chrs[ren_off(s, i1)], 2);)
 				i1 = ren_next(s, i1, 1);
@@ -2089,7 +2096,7 @@ void vi(s64 init)
 		lsp_wake = 0;
 		vi_arg = vi_prefix();
 		term_dec()
-		if (lnum_mode == 1) {
+		if (lnum_mode == LN_ONCE) {
 			lnum_mode = 0;
 			lnum_width = 0;
 			vi_mod |= 1;
@@ -2876,7 +2883,7 @@ static void *vi_rendloop(void *arg)
 			ts_redraw = 0;
 		}
 		if (vi_mod & 1 || opt_left_col != oleft
-				|| (lnum_mode && orow != cursor_row && !(lnum_mode == 2))
+				|| (lnum_mode && orow != cursor_row && !(lnum_mode == LN_ABS))
 				|| (*vi_word && orow != cursor_row))
 			vi_drawagain(view_top_row);
 		else if (*vi_word && !xlw && (ooff != cursor_off || vi_mod & 2)
