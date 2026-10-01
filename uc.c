@@ -1,4 +1,4 @@
-unsigned char utf8_length[256] = {
+unsigned char _utf8_length[256] = {
 	/*	0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F */
 	/* 0 */ 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 	/* 1 */ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -17,11 +17,12 @@ unsigned char utf8_length[256] = {
 	/* E */ 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	/* F */ 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1
 };
+unsigned char *utf8_length = _utf8_length;
 
 /* the number of utf-8 characters in a fat nulled s */
-int uc_slen(char *s)
+s64 uc_slen(char *s)
 {
-	int n = 0, l;
+	s64 n = 0, l;
 	for (; (l = uc_len(s)); n++)
 		s += l;
 	return n;
@@ -36,9 +37,9 @@ char *uc_beg(char *beg, char *s)
 	return s;
 }
 
-char *uc_chrn(char *s, int off, int *n)
+char *uc_chrn(char *s, s64 off, s64 *n)
 {
-	int l;
+	s64 l;
 	*n = 0;
 	if (!s)
 		return "";
@@ -50,27 +51,27 @@ char *uc_chrn(char *s, int off, int *n)
 	return s;
 }
 
-char *uc_chr(char *s, int off)
+char *uc_chr(char *s, s64 off)
 {
-	int n;
+	s64 n;
 	return uc_chrn(s, off, &n);
 }
 
 /* the number of characters between s and s + off */
-int uc_off(char *s, int off)
+s64 uc_off(char *s, s64 off)
 {
 	char *e = s + off;
-	int i, l;
+	s64 i, l;
 	for (i = 0; s < e && (l = uc_len(s)); i++)
 		s += l;
 	return i;
 }
 
-char *uc_subl(char *s, int beg, int end, int *rlen)
+char *uc_subl(char *s, s64 beg, s64 end, s64 *rlen)
 {
 	char *sbeg = uc_chr(s, beg);
 	char *send = uc_chr(sbeg, end - beg);
-	int len = sbeg < send ? send - sbeg : 0;
+	s64 len = sbeg < send ? send - sbeg : 0;
 	char *r = emalloc(len + 4);
 	memcpy(r, sbeg, len);
 	memset(r+len, '\0', 4);
@@ -78,13 +79,13 @@ char *uc_subl(char *s, int beg, int end, int *rlen)
 	return r;
 }
 
-char *uc_sub(char *s, int beg, int end)
+char *uc_sub(char *s, s64 beg, s64 end)
 {
-	int l;
+	s64 l;
 	return uc_subl(s, beg, end, &l);
 }
 
-int uc_kind(char *c)
+s64 uc_kind(char *c)
 {
 	if (uc_isspace(*c))
 		return 0;
@@ -101,11 +102,11 @@ int uc_kind(char *c)
 
 /* sorted list of characters that can be shaped */
 static struct achar {
-	unsigned int c;		/* utf-8 code */
-	unsigned int s;		/* single form */
-	unsigned int i;		/* initial form */
-	unsigned int m;		/* medial form */
-	unsigned int f;		/* final form */
+	u64 c;		/* utf-8 code */
+	u64 s;		/* single form */
+	u64 i;		/* initial form */
+	u64 m;		/* medial form */
+	u64 f;		/* final form */
 } achars[] = {
 	{0x0621, 0xfe80},				/* hamza */
 	{0x0622, 0xfe81, 0, 0, 0xfe82},			/* alef madda */
@@ -154,9 +155,9 @@ static struct achar {
 	{0x200d, 0, 0x200d, 0x200d},			/* ZWJ */
 };
 
-static struct achar *find_achar(unsigned int c)
+static struct achar *find_achar(u64 c)
 {
-	int h, m, l;
+	s64 h, m, l;
 	h = LEN(achars);
 	l = 0;
 	/* using binary search to find c */
@@ -172,17 +173,17 @@ static struct achar *find_achar(unsigned int c)
 	return NULL;
 }
 
-static int can_join(int c1, int c2)
+static s64 can_join(s64 c1, s64 c2)
 {
 	struct achar *a1 = find_achar(c1);
 	struct achar *a2 = find_achar(c2);
 	return a1 && a2 && (a1->i || a1->m) && (a2->f || a2->m);
 }
 
-static int uc_cshape(int cur, int prev, int next)
+static s64 uc_cshape(s64 cur, s64 prev, s64 next)
 {
-	int c = cur;
-	int join_prev, join_next;
+	s64 c = cur;
+	s64 join_prev, join_next;
 	struct achar *ac = find_achar(c);
 	if (!ac)		/* ignore non-Arabic characters */
 		return c;
@@ -216,16 +217,16 @@ static int uc_cshape(int cur, int prev, int next)
  * + 0x0655: hamza below
  * + 0x0670: superscript alef
  */
-int uc_acomb(int c)
+s64 uc_acomb(s64 c)
 {
 	return (c >= 0x064b && c <= 0x0655) ||		/* the standard diacritics */
 		(c >= 0xfc5e && c <= 0xfc63) ||		/* shadda ligatures */
 		c == 0x0670;				/* superscript alef */
 }
 
-static void uc_cput(char *d, int c)
+static void uc_cput(char *d, s64 c)
 {
-	int l = 0;
+	s64 l = 0;
 	if (c > 0xffff) {
 		*d++ = 0xf0 | (c >> 18);
 		l = 3;
@@ -244,11 +245,11 @@ static void uc_cput(char *d, int c)
 }
 
 /* shape the given arabic character; returns a static buffer */
-char *uc_shape(char *beg, char *s, int c)
+char *uc_shape(char *beg, char *s, s64 c)
 {
 	static char out[16];
 	char *r;
-	int tmp, l, prev = 0, next = 0;
+	s64 tmp, l, prev = 0, next = 0;
 	if (!c || !UC_R2L(c))
 		return NULL;
 	r = s;
@@ -273,7 +274,7 @@ char *uc_shape(char *beg, char *s, int c)
 	return out;
 }
 
-static int dwchars[][2] = {
+static s64 dwchars[][2] = {
 	{0x1100, 0x115F}, {0x231A, 0x231B}, {0x2329, 0x2329}, {0x232A, 0x232A},
 	{0x23E9, 0x23EC}, {0x23F0, 0x23F0}, {0x23F3, 0x23F3}, {0x25FD, 0x25FE},
 	{0x2614, 0x2615}, {0x2648, 0x2653}, {0x267F, 0x267F}, {0x2693, 0x2693},
@@ -348,7 +349,7 @@ static int dwchars[][2] = {
 	{0x31350, 0x323AF}, {0x323B0, 0x3FFFD},
 };
 
-static int zwchars[][2] = {
+static s64 zwchars[][2] = {
 	{0xAD, 0xAD}, {0x300, 0x36F}, {0x483, 0x489}, {0x591, 0x5BD},
 	{0x5BF, 0x5BF}, {0x5C1, 0x5C2}, {0x5C4, 0x5C5}, {0x5C7, 0x5C7},
 	{0x600, 0x605}, {0x610, 0x61A}, {0x61C, 0x61C}, {0x64B, 0x65F},
@@ -440,10 +441,10 @@ static int zwchars[][2] = {
 	{0x1E2AE, 0x1E2AE}, {0x1E2EC, 0x1E2EF}, {0x1E4EC, 0x1E4EF}, {0x1E8D0, 0x1E8D6},
 	{0x1E944, 0x1E94A}, {0xE0001, 0xE0001}, {0xE0020, 0xE007F},
 };
-int zwlen = LEN(zwchars);
-int def_zwlen = LEN(zwchars);
+s64 zwlen = LEN(zwchars);
+s64 def_zwlen = LEN(zwchars);
 
-static int bchars[][2] = {
+static s64 bchars[][2] = {
 	{0x00000, 0x0001f}, {0x00080, 0x0009f}, {0x00300, 0x0036f},
 	{0x00379, 0x00379}, {0x00380, 0x00383}, {0x0038d, 0x0038d},
 	{0x00483, 0x00489}, {0x00527, 0x00530}, {0x00558, 0x00558},
@@ -578,15 +579,15 @@ static int bchars[][2] = {
 	{0x1f233, 0x1f23f}, {0x1f24a, 0x1ffff}, {0x2a6d8, 0x2a6ff},
 	{0x2b736, 0x2f7ff}, {0x2fa1f, 0x10ffff},
 };
-int bclen = LEN(bchars);
-int def_bclen = LEN(bchars);
+s64 bclen = LEN(bchars);
+s64 def_bclen = LEN(bchars);
 
-static int find(int c, int tab[][2], int n)
+static s64 find(s64 c, s64 tab[][2], s64 n)
 {
 	if (c < tab[0][0] || !n)
 		return 0;
-	int m, l = 0;
-	int h = n - 1;
+	s64 m, l = 0;
+	s64 h = n - 1;
 	while (l <= h) {
 		m = (h + l) / 2;
 		if (c >= tab[m][0] && c <= tab[m][1])
@@ -600,19 +601,19 @@ static int find(int c, int tab[][2], int n)
 }
 
 /* double-width characters */
-static int uc_isdw(int c)
+static s64 uc_isdw(s64 c)
 {
 	return find(c, dwchars, LEN(dwchars));
 }
 
 /* (nonprintable) zero width & combining characters */
-int uc_isbell(int c)
+s64 uc_isbell(s64 c)
 {
 	return find(c, zwchars, zwlen) || find(c, bchars, bclen);
 }
 
 /* printing width */
-int uc_wid(int c)
+s64 uc_wid(s64 c)
 {
 	if (uc_isdw(c))
 		return 2;

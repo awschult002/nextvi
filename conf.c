@@ -1,7 +1,58 @@
 #include "kmap.h"
 
+/* Embedded subzeroclaw configuration. NULL log_dir uses $HOME/.nextvi/logs. */
+static char *log_dir;
+#define LOCAL 1
+#define OPENROUTER 1
+
+#if LOCAL == 1
+static char *api_key = "local";
+static char *endpoint = "http://127.0.0.1:8080/v1/chat/completions";
+static char *request_extra = "{}";
+static s64 request_timeout = 5000;
+#elif OPENROUTER == 1
+static char *api_key = "YOUR_OPENROUTER_API_KEY";
+static char *endpoint = "https://openrouter.ai/api/v1/chat/completions";
+static char *request_extra = "{\"model\":\"PROVIDER/MODEL_ID\"}";
+static s64 request_timeout = 500;
+#endif
+
+static s64 max_tool_rounds = 300;
+s64 xgr = 2;	/* agent guardrails: anything but 2 = disabled */
+s64 xar;	/* display returned agent reasoning (:ar) */
+s64 xaco;	/* autocompact input-token threshold; 0 disables */
+static s64 xaco_browse;	/* last selected mode: aco! rather than aco */
+
+static char exspec_insert[] =
+	"Ex special characters are disabled and raw ex mode is on by default.\n"
+	"Supply literal text as [str] directly. No dot terminator or escapes required.\n"
+	"[str] is required.";
+
+/* Additional :exspec lines; repeat a command to append more lines. */
+static struct {
+	char *cmd, *text;
+} conf_exspec[] = {
+	{"i", exspec_insert},
+	{"c", exspec_insert},
+	{"p", "Cursor position is stateful; left at the range position it landed on."},
+	{"p", "Keep reads small and within buffer bounds."},
+	{"p", "Check the position with = and line count with $= before printing ranges."},
+	{"p", "Use character ranges for long lines; stop when you have enough context."},
+	{"p", "Ex special characters disabled by default. p % example will not work."},
+	{"g", "Ex special characters disabled by default. Command chaining unavailable."},
+	{"w", "Ex special characters disabled by default. Do not escape ! character."},
+	{"r", "Ex special characters disabled by default. Do not escape ! character."},
+	{"parsing", "Ex special characters disabled by default. Command chaining unavailable."},
+	{"escapes", "Ex special characters disabled by default."},
+	{"expansion", "Ex special characters disabled by default. Expansion unavailable."},
+};
+
 /* access mode of new files */
-const int conf_mode = 0600;
+const s64 conf_mode = 0600;
+
+/* the speller of the sl command, must speak the ispell pipe protocol */
+char spell_cmd[] = "aspell -a";
+
 #define FTGEN(ft) static char ft##_ft[] = #ft;
 #define FT(ft) ft##_ft
 FTGEN(c) FTGEN(roff) FTGEN(tex) FTGEN(mbox)
@@ -18,6 +69,7 @@ char vs_ft[] = "/vs";	/* vi search prompt (is never '\n' terminated) */
 char bar_ft[] = "/-";	/* status bar (is never '\n' terminated) */
 char fuzz_ft[] = "/f";	/* fuzzy search prompt (is never '\n' terminated) */
 char msg_ft[] = "/>";	/* ex message (is never '\n' terminated) */
+char lsp_ft[] = "/lsp";	/* lsp diagnostic virtual text */
 
 struct filetype fts[] = {
 	{FT(c), "\\.(c|h|cpp|hpp|cc|cs)$"},			/* C */
@@ -41,9 +93,33 @@ struct filetype fts[] = {
 	{vs_ft, NULL},
 	{bar_ft, NULL},
 	{fuzz_ft, NULL},
-	{msg_ft, NULL}
+	{msg_ft, NULL},
+	{lsp_ft, NULL}
 };
-const int ftslen = LEN(fts);
+const s64 ftslen = LEN(fts);
+
+/* aspell's context filter, checking only "#" comments; the stock comment
+ * mode is the inverse, it hides comments and checks the code */
+#define SPHASH	"--mode=none --add-filter=context --clear-context-delimiters "\
+		"--dont-context-visible-first --add-context-delimiters='# \\0'"
+
+/* per filetype speller arguments, aspell filter modes: sl reads the prose of
+ * a source file, not its identifiers. Change along with spell_cmd for a
+ * speller other than aspell */
+struct spellft spell_fts[] = {
+	{FT(c), "--mode=ccpp"},
+	{FT(js), "--mode=ccpp"},
+	{FT(go), "--mode=ccpp"},
+	{FT(mk), SPHASH},
+	{FT(sh), SPHASH},
+	{FT(py), SPHASH},
+	{FT(roff), "--mode=nroff"},
+	{FT(tex), "--mode=tex"},
+	{FT(mbox), "--mode=email"},
+	{FT(html), "--mode=html"},
+	{FT(md), "--mode=markdown"}
+};
+const s64 spell_ftslen = LEN(spell_fts);
 
 #define NA	0	/* no attribute */
 #define RE	1	/* red */
@@ -62,7 +138,10 @@ const int ftslen = LEN(fts);
 #define CY1	14	/* bright cyan */
 #define WH1	15	/* bright white */
 
-#define A(...) (int[]){__VA_ARGS__}
+#define A(...) (s64 []){__VA_ARGS__}
+/* att of the misspelled words, used by sl; set 9 is theirs alone, an earlier
+ * filetype rule on the line, a comment or a heading, never swallows them */
+#define SP	A(SYN_BGMK(RE1) | SYN_OWR)
 
 /* At least 1 entry is required in this struct for fallback */
 /* lbuf lines are *always "\n\0" terminated, for $ to work one needs to account for '\n' too */
@@ -70,6 +149,7 @@ struct highlight hls[] = {
 	{_ft, NULL, A(CY1 | SYN_BD), 1, 2},  /* <-- optional, used by hll if set */
 	{_ft, NULL, A(RE1 | SYN_BGMK(GR1)), 0, 3}, /* <-- optional, used by hlp if set */
 	{_ft, NULL, A(RE1), 0, 1}, /* <-- optional, used by hlw if set */
+	{_ft, NULL, SP, 9, 5}, /* <-- optional, used by sl if set */
 
 	{FT(c), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(c), "(/\\*(?:(?!^\\*/).)*)|((?:(?!^/\\*)(?!^//).)*\\*/\
@@ -98,6 +178,7 @@ bool|const|inline|restrict|auto|(true|false|_?_?asm_?_?|mem(?:set|cpy|cmp)|free|
 	{FT(c), NULL, A(RE1 | SYN_BGMK(BL1)), 0, 3},
 	{FT(c), "(\\?).+?(:)", A(SYN_IGN, YE | SYN_SATT, 2, NA, CY1,
 				YE | SYN_SATT, 2, NA, CY1), 5},
+	{FT(c), NULL, SP, 9, 5},
 
 	{FT(roff), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(roff), "^[.'][ \t]*(([sS][hH].*)|(de) (.*)|([^ \t\\\\]{2,}))?.*",
@@ -107,6 +188,7 @@ bool|const|inline|restrict|auto|(true|false|_?_?asm_?_?|mem(?:set|cpy|cmp)|free|
 	{FT(roff), "\\\\{1,2}[*$fgkmns](?:[^[\\(]|\\(..|\\[[^\\]]*\\])", A(YE)},
 	{FT(roff), "\\\\(?:[^[\\(*$fgkmns]|\\(..|\\[[^\\]]*\\])", A(YE)},
 	{FT(roff), "\\$[^$]+\\$", A(YE)},
+	{FT(roff), NULL, SP, 9, 5},
 
 	{FT(tex), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(tex), NULL, A(RE1), 0, 1},
@@ -114,6 +196,7 @@ bool|const|inline|restrict|auto|(true|false|_?_?asm_?_?|mem(?:set|cpy|cmp)|free|
 		A(BL | SYN_BD, NA, YE, NA, MA)},
 	{FT(tex), "\\$[^$]+\\$", A(YE)},
 	{FT(tex), "%.*", A(GR | SYN_IT)},
+	{FT(tex), NULL, SP, 9, 5},
 
 	{FT(mbox), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(mbox), NULL, A(RE1), 0, 1},
@@ -124,6 +207,7 @@ bool|const|inline|restrict|auto|(true|false|_?_?asm_?_?|mem(?:set|cpy|cmp)|free|
 	{FT(mbox), "^Cc: (.*)", A(CY | SYN_BD, MA | SYN_BD)},
 	{FT(mbox), "^[-A-Za-z]+: .+", A(CY | SYN_BD)},
 	{FT(mbox), "^> .*", A(GR | SYN_IT)},
+	{FT(mbox), NULL, SP, 9, 5},
 
 	{FT(mk), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(mk), NULL, A(RE1), 0, 1},
@@ -131,6 +215,7 @@ bool|const|inline|restrict|auto|(true|false|_?_?asm_?_?|mem(?:set|cpy|cmp)|free|
 	{FT(mk), "\\$[\\({][a-zA-Z0-9_]+[\\)}]|\\$\\$", A(YE)},
 	{FT(mk), "#.*", A(GR | SYN_IT)},
 	{FT(mk), "([A-Za-z_%.\\-]+):", A(NA, SYN_BD)},
+	{FT(mk), NULL, SP, 9, 5},
 
 	{FT(sh), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(sh), NULL, A(RE1), 0, 1},
@@ -143,6 +228,7 @@ bool|const|inline|restrict|auto|(true|false|_?_?asm_?_?|mem(?:set|cpy|cmp)|free|
 	{FT(sh), "\\$(?:\\{[^}]+}|[a-zA-Z_0-9]+|[!#$?*@-])", A(RE)},
 	{FT(sh), "^([a-zA-Z_0-9]* *\\(\\)) *\\{", A(NA, SYN_BD)},
 	{FT(sh), "^\\. .*", A(SYN_BD)},
+	{FT(sh), NULL, SP, 9, 5},
 
 	{FT(py), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(py), NULL, A(RE1), 0, 1},
@@ -155,6 +241,7 @@ for|from|global|if|import|in|is|lambda|not|or|pass|print|raise|return|try|while)
 		A(CY | SYN_BLK, SYN_BSE | SYN_BSDP | SYN_BEDP)},
 	{FT(py), "[\"](?:\\\\\"|[^\"])*?[\"]", A(BL)},
 	{FT(py), "['](?:\\\\'|[^'])*?[']", A(BL)},
+	{FT(py), NULL, SP, 9, 5},
 
 	{FT(js), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(js), "(/\\*(?:(?!^\\*/).)*)|((?:(?!^/\\*).)*\\*/(?![\"'`]))",
@@ -173,6 +260,7 @@ length|Math|NaN|name|Number|Object|prototype|String|toString|undefined|valueOf))
 	{FT(js), "'(?:[^'\\\\]|\\\\.)*'", A(MA)},
 	{FT(js), "\"(?:[^\"\\\\]|\\\\.)*\"", A(MA)},
 	{FT(js), "`(?:[^`\\\\]|\\\\.)*`", A(MA)},
+	{FT(js), NULL, SP, 9, 5},
 
 	{FT(html), "<(/)?(?:[^>](?:\".*?\")*(?:'.*?')*(?:<.*?>)*)+>", A(YE, MA1), 1},
 	{FT(html), "^(?:[ \t.,#*:a-zA-Z0-9_-]+(?:\\(.*\\))*(?:\\[.*\\])*[ \t+~>]?)*(?=^\\{)", A(WH1), 2},
@@ -227,12 +315,14 @@ fr|deg|rad|turn|grad|ms|s|hz|khz|dpi|dpcm|dppx|%|))\\>", A(RE1 | SYN_ATT, 4, 69,
 	{FT(html), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(html), NULL, A(RE1), 0, 1},
 	{FT(html), NULL, A(AY | SYN_BGMK(RE1)), 0, 3},
+	{FT(html), NULL, SP, 9, 5},
 
 	{FT(diff), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(diff), "^-.*", A(RE)},
 	{FT(diff), "^\\+.*", A(GR)},
 	{FT(diff), "^@.*", A(CY)},
 	{FT(diff), "^diff .*", A(SYN_BD)},
+	{FT(diff), NULL, SP, 9, 5},
 
 	{FT(go), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(go), "(/\\*(?:(?!^\\*/).)*)|((?:(?!^/\\*).)*\\*/(?#-1)(?<\".*\\*/.*\"))",
@@ -251,6 +341,7 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
 	{FT(go), "[a-zA-Z0-9_]+(?=^\\()", A(SYN_BD)},
 	{FT(go), "'(?:[^\\\\]|\\\\.|\\\\x[0-9a-fA-F]{2}|\\\\u[0-9a-fA-F]{4}|\\\\U[0-9a-fA-F]{8}|\\\\[0-7]{3})'", A(MA)},
 	{FT(go), "[-+.]?\\<(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|[0-9]+\\.?[0-9eEi]*|[0-9]+)\\>", A(RE1)},
+	{FT(go), NULL, SP, 9, 5},
 
 	{FT(md), NULL, A(CY1 | SYN_BD), 1, 2},
 	{FT(md), NULL, A(RE1), 0, 1},
@@ -274,6 +365,7 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
 	{FT(md), "^[ \t]*[0-9]+[.] ", A(YE)},
 	{FT(md), "[[][^[\\]]+[\\]]\\([^\\(\\)]+\\)", A(CY)},
 	{FT(md), "![[][^[\\]]+[\\]]\\([^\\(\\)]+\\)", A(MA)},
+	{FT(md), NULL, SP, 9, 5},
 
 	{fm_ft, "^.+\n$", A(AY1), 1},
 	{fm_ft, "(^\\.?\\.?)/|(\\.\\.(/))|(?:[^/]+/)+", A(CY, BL, BL, CY), 2},
@@ -297,12 +389,13 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
 (?:'[0-9]+)|([.%$]|[0-9 \t]*)?))(?:([-*-+/%])[ \t]*[0-9]+[ \t]*)*(?:[ \t]*\\|(?:[^|\\\\]|\\\\.?)*\\|?[ \t]*)*)[ \t]*\
 (?:([,;]#?)[ \t]*((?:\\|(?:[^|\\\\]|\\\\.?)*\\|?[ \t]*)*(?:(?:<(?:[^<\\\\]|\\\\.?)*<?|>(?:[^>\\\\]|\\\\.?)*>?)|\
 (?:'[0-9]+)|([.$]|[0-9 \t]*)?))(?:([-*-+/%])[ \t]*([0-9]+)[ \t]*)*(?:[ \t]*\\|(?:[^|\\\\]|\\\\.?)*\\|?)*[ \t]*)*)\
-((pac|pr|ai|ish|err|fr|ic|grp|mpt|rr|shape|seq|ts|td|order|hl[lwpr]?|left|lim|led|vis)\
-|[@&!dj]|m!?|=\\?{0,1}|\\?~|\\?{1,2}[?!]?|b[psx]?|p[uh]?|ac|e[f!]?!?|f[-+><tdp]?|inc|i|sc!?|\
-(?:g!?|s)[ \t]?(.)?|q!?|reg?\\+?|rd?|w(?:q!|[q!])?|u[czbd]|x!?|ya[!+]?|cm!?|cd?)?",
+((pac|sw|et|idt|pr|aco!?|ai|ar|aspec|ish|err|fr|ic|grp|mpt|rr|shape|seq|ts|td|tc|order|hl(?:lw|[lwpr])?|left|lim|led|vis)\
+|[@&!dj]|m!?|=\\?{0,1}|\\?~|\\?{1,2}[?!]?|b[psx]?|p[uh]?|aretry|apack!?|acm?|ast|a[!~]?|exspec|e[f!]?!?|f[-+><tdp]?|inc|i|sl!?|sc!?|lsp|lw|\
+(?:g!?|s)[ \t]?(.)?|q!?|reg?\\+?|rd?|w(?:q!|q?a!?|[q!])?|u[czbd]|xa?!?|ya[!+]?|cm!?|cd?)?",
 		A(BL1 | SYN_BD, RE, RE, RE, RE, WH1, MA1, RE, RE, WH1, RE, GR1, CY1, MA1)},
 	{ex_ft, "\\\\(.)", A(AY1 | SYN_BD, YE)},
 	{ex_ft, "!(?:[^!\\\\]|\\\\.?)*!?|%(?:#|[0-9]+|@([0-9]+))?", A(WH1 | SYN_BD, CY1)},
+	{ex_ft, NULL, SP, 9, 5},
 
 	{vs_ft, ".+", A(AY1 | SYN_BD), 1},
 	{vs_ft, "(^[?/])|(\\\\[<>]|\\(\\?[:=!<>#]|\\[\\^?((?:\\\\.?|[^\\]])*)]|\\[|[.^$\\()*+|?]|\\{([0-9]*(,)?[0-9]*)?}?)|\\\\(.)",
@@ -312,7 +405,7 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
 		A(GR1 | SYN_BD | SYN_ATT, 1, GR1, AY1, YE, WH1, AY1, YE, WH1, AY1, YE, WH1, AY1, YE, WH1), 2},
 
 	{bar_ft, "^(\".*\").*(\\[[nwrf]\\]).*$", A(AY1 | SYN_BD, BL, RE)},
-	{bar_ft, "^<(.+)> (?:[^ ]+ )*([0-9]+L) ([0-9]+W) (S[0-9]+) (O[0-9]+) (C[0-9]+)$",
+	{bar_ft, "^<(.+)> (?:[^ ]+ )*([0-9]+L) ([0-9]+W) (S[0-9]+) (O[0-9]+) (C[0-9]+).*$",
 		A(AY1 | SYN_BD, RE1, BL, YE, MA, CY1, YE1)},
 	{bar_ft, "^(\".*\").* ([0-9]{1,3}%) (L[0-9]+) (C[0-9]+) (B-?[0-9]+)?.*$",
 		A(AY1 | SYN_BD, BL, RE1, BL, YE1, GR)},
@@ -322,15 +415,25 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
 	{fuzz_ft, NULL, A(RE1 | SYN_BD), 1, 1},
 
 	{msg_ft, ".+", A(AY1 | SYN_BD)},
+
+	{lsp_ft, "^.*error.*$", A(RE1 | SYN_IT)},
+	{lsp_ft, "^.*warning.*$", A(YE1 | SYN_IT)},
+	{lsp_ft, "^.*$", A(BL1 | SYN_IT)},
 };
-const int hlslen = LEN(hls);
+const s64 hlslen = LEN(hls);
 
 /* ids of optional hls, reset and reloaded on filetype change */
-const int hlopts[] = {1, 2};
-const int hloptslen = LEN(hlopts);
+const s64 hlopts[] = {1, 2, 5};
+const s64 hloptslen = LEN(hlopts);
 
 /* how to highlight text in the reverse direction */
-const int conf_hlrev = SYN_BGMK(8);
+const s64 conf_hlrev = SYN_BGMK(8);
+
+/* how to highlight the search matches */
+const s64 conf_hlmat = RE1;
+
+/* how to highlight the search match the cursor lands on */
+const s64 conf_hlmatc = RE1 | SYN_BGMK(8);
 
 /* right-to-left characters */
 #define CR2L		"ء-يپچژکگی‌-‍؛،»«؟ً-ْٔ"
@@ -341,39 +444,77 @@ struct dircontext dctxs[] = {
 	{"^[" CR2L "]", -1},
 	{"^[a-zA-Z_0-9]", +1},
 };
-const int dctxlen = LEN(dctxs);
+const s64 dctxlen = LEN(dctxs);
 
 struct dirmark dmarks[] = {
 	{"[" CR2L "][" CNEUT CR2L "]*[" CR2L "]", +1, {-1}},
 	{"^([ \t]+)?([" CNEUT "]*[^" CR2L "]*[^" CR2L CNEUT "](?:[" CNEUT "]+$)?)", -1, {0, 1, -1}},
 	{"[^" CR2L CNEUT "][^" CR2L "]*[^" CR2L CNEUT "](?:[" CNEUT "]+$)?", -1, {-1}},
 };
-const int dmarkslen = LEN(dmarks);
+const s64 dmarkslen = LEN(dmarks);
 
 struct placeholder _ph[2] = {
 	{{0x0,0x1f}, "^", 1, 1},
 	{{0x200c,0x200d}, "-", 1, 3},
 };
 struct placeholder *ph = _ph;
-int phlen = LEN(_ph);
+s64 phlen = LEN(_ph);
 
-char **conf_kmap(int id)
+char **conf_kmap(s64 id)
 {
 	return kmaps[id];
 }
 
-int conf_kmapfind(char *name)
+s64 conf_kmapfind(char *name)
 {
-	for (int i = 0; i < LEN(kmaps); i++)
+	for (s64 i = 0; i < LEN(kmaps); i++)
 		if (name && kmaps[i][0] && !strcmp(name, kmaps[i][0]))
 			return i;
 	return 0;
 }
 
-char *conf_digraph(int c1, int c2)
+char *conf_digraph(s64 c1, s64 c2)
 {
-	for (int i = 0; i < LEN(digraphs); i++)
+	for (s64 i = 0; i < LEN(digraphs); i++)
 		if (digraphs[i][0][0] == c1 && digraphs[i][0][1] == c2)
 			return digraphs[i][1];
 	return NULL;
 }
+
+/* Tree-sitter grammar and predicate-free query configuration. */
+#include <tree_sitter/api.h>
+extern const TSLanguage *tree_sitter_c(void);
+static const struct {
+	char *ft;
+	const TSLanguage *(*language)(void);
+	const char *query;
+} ts_languages[] = {
+	{FT(c), tree_sitter_c,
+	"(primitive_type) @type (type_identifier) @type "
+	"(sized_type_specifier) @type "
+	"[\"const\" \"volatile\" \"restrict\" \"static\" \"extern\" \"inline\" "
+	"\"typedef\" \"struct\" \"union\" \"enum\" \"register\" \"auto\"] @type "
+	"[\"if\" \"else\" \"switch\" \"case\" \"default\" \"for\" \"while\" "
+	"\"do\" \"break\" \"continue\" \"return\" \"goto\" \"sizeof\"] @keyword "
+	"[\"+\" \"-\" \"*\" \"/\" \"%\" \"=\" \"==\" \"!=\" \"<\" \">\" "
+	"\"<=\" \">=\" \"&&\" \"||\" \"!\" \"~\" \"&\" \"|\" \"^\" "
+	"\"<<\" \">>\" \"++\" \"--\" \"+=\" \"-=\" \"*=\" \"/=\" "
+	"\"%=\" \"&=\" \"|=\" \"^=\" \"<<=\" \">>=\" \"?\" \":\" \"->\"] @operator "
+	"(call_expression function: (identifier) @function) "
+	"(function_declarator declarator: (identifier) @function) "
+	"(preproc_directive) @preprocessor "
+	"[\"#include\" \"#define\" \"#if\" \"#ifdef\" \"#ifndef\" \"#else\" "
+	"\"#elif\" \"#endif\"] @preprocessor "
+	"(number_literal) @number "
+	"[(string_literal) (system_lib_string)] @string (char_literal) @character "
+	"(escape_sequence) @escape (comment) @comment"},
+};
+static const struct {
+	const char *name;
+	s64 att;
+} ts_attributes[] = {
+	{"type", GR1}, {"keyword", YE1}, {"operator", RE},
+	{"function", SYN_BD}, {"preprocessor", CY}, {"number", RE1},
+	{"string", MA}, {"character", MA}, {"escape", CY1},
+	{"comment", BL | SYN_IT},
+};

@@ -1,13 +1,13 @@
 static struct termios termios;
 struct pollfd term_ufd = {STDIN_FILENO, POLLIN};
 sbuf *term_sbuf;
-int term_record;
-int term_winch;
-int term_resized;
-int xrows, xcols;
-unsigned int tibuf_pos, tibuf_cnt, tibuf_sz = 128, ticmd_pos;
+s64 term_record;
+s64 term_winch;
+s64 term_resized;
+s64 xrows, xcols;
+u64 tibuf_pos, tibuf_cnt, tibuf_sz = 128, ticmd_pos;
 unsigned char *tibuf, ticmd[4096];
-unsigned int texec, texec_n;
+u64 texec, texec_n;
 
 void term_init(void)
 {
@@ -40,6 +40,7 @@ void term_done(void)
 		return;
 	term_commit();
 	sbuf_free(term_sbuf)
+	term_sbuf = NULL;
 	tcsetattr(term_ufd.fd, 0, &termios);
 }
 
@@ -75,7 +76,7 @@ static void term_out(char *s)
 		term_write(s, strlen(s))
 }
 
-void term_chr(int ch)
+void term_chr(s64 ch)
 {
 	char s[4] = {ch};
 	term_out(s);
@@ -86,18 +87,18 @@ void term_kill(void)
 	term_out("\33[K");
 }
 
-void term_room(int n)
+void term_room(s64 n)
 {
 	char cmd[64] = "\33[";
 	if (!n)
 		return;
-	char *s = itoa(abs(n), cmd+2);
+	char *s = itoa(labs(n), cmd+2);
 	s[0] = n < 0 ? 'M' : 'L';
 	s[1] = '\0';
 	term_out(cmd);
 }
 
-void term_pos(int r, int c)
+void term_pos(s64 r, s64 c)
 {
 	char buf[64] = "\r\33[", *s;
 	if (r < 0) {
@@ -115,9 +116,9 @@ void term_pos(int r, int c)
 }
 
 /* read s before reading from the terminal */
-void term_push(char *s, unsigned int n)
+void term_push(char *s, u64 n)
 {
-	static unsigned int tibuf_prev;
+	static u64 tibuf_prev;
 	if (tibuf_cnt + n >= tibuf_sz || tibuf_sz - (tibuf_cnt + n) > 128) {
 		tibuf_sz = tibuf_cnt + n + 128;
 		tibuf = erealloc(tibuf, tibuf_sz);
@@ -139,14 +140,21 @@ void term_push(char *s, unsigned int n)
 	tibuf_cnt += n;
 }
 
-int term_read(int winch)
+s64 term_read(s64 winch)
 {
-	int cw;
+	static struct pollfd ufd[1 + LSP_NFDS_MAX];
+	s64 cw, i, nfds;
 	if (tibuf_pos >= tibuf_cnt) {
 		if (texec) {
 			xquit = !xquit ? 1 : xquit;
 			if (texec == '&')
 				goto err;
+		}
+		if (agent_tool) {
+			agent_input_blocked = 1;
+			xquit = !xquit ? 1 : xquit;
+			*tibuf = TK_CTL('c');
+			goto ret;
 		}
 		if (term_winch && winch) {
 			*tibuf = winch;	/* yield until term_winch is cleared */
@@ -154,35 +162,62 @@ int term_read(int winch)
 		}
 		cw = 0;
 		re:
-		/* read a single input character */
-		if (xquit < 0 || poll(&term_ufd, 1, -1) <= 0 ||
-				read(term_ufd.fd, tibuf, 1) <= 0) {
-			xquit = !isatty(term_ufd.fd) ? -1 : xquit;
-			if (term_winch && winch && xquit >= 0) {
-				*tibuf = winch;
-				goto ret;
-			} else if (term_winch != cw && !winch && xquit >= 0) {
-				cw = term_winch;
+		ufd[0].fd = term_ufd.fd;
+		ufd[0].events = POLLIN;
+		/* the count is kept: servicing an fd below may unregister it */
+		for (i = 0, nfds = lsp_nfds; i < nfds; i++) {
+			ufd[i+1].fd = lsp_fds[i];
+			ufd[i+1].events = POLLIN;
+		}
+		/* read a single input character, servicing lsp fds */
+		if (xquit >= 0 && poll(ufd, 1 + nfds, -1) > 0) {
+			/* POLLHUP too: a server that died must be reaped here,
+			 * else its fd stays in the set and poll() never blocks */
+			for (i = 0; i < nfds; i++)
+				if (ufd[i+1].revents & (POLLIN | POLLHUP | POLLERR))
+					lsp_process_fd(ufd[i+1].fd);
+			/* only POLLIN yields input; on POLLHUP the read below
+			 * fails and the usual end of input handling takes over */
+			if (!(ufd[0].revents & (POLLIN | POLLHUP | POLLERR))) {
+				if (term_winch && winch) {
+					*tibuf = winch;
+					goto ret;
+				}
+				if (lsp_dirty && lsp_wake)
+					goto err;	/* yield so vi redraws diagnostics */
 				goto re;
 			}
-			err:
-			*tibuf = 0;
-		} else if (xrr > 0) {
-			static char buf[2];
-			buf[0] = *tibuf;
-			ex_regput(xrr, buf, 1);
+			if (read(term_ufd.fd, tibuf, 1) > 0) {
+				if (xrr > 0) {
+					static char buf[2];
+					buf[0] = *tibuf;
+					ex_regput(xrr, buf, 1);
+				}
+				goto ret;
+			}
 		}
+		xquit = !isatty(term_ufd.fd) ? -1 : xquit;
+		if (term_winch && winch && xquit >= 0) {
+			*tibuf = winch;
+			goto ret;
+		} else if (term_winch != cw && !winch && xquit >= 0) {
+			cw = term_winch;
+			goto re;
+		}
+		err:
+		*tibuf = 0;
 		ret:
 		tibuf_cnt = 1;
 		tibuf_pos = 0;
 	}
+	vi_rendwait();		/* the queued frame overlaps the read above */
 	if (ticmd_pos < sizeof(ticmd))
 		ticmd[ticmd_pos++] = tibuf[tibuf_pos];
 	return tibuf[tibuf_pos++];
 }
 
 /* return a static string that changes text attributes to att */
-char *term_att(int att)
+char *term_att(s64 att)
 {
 	if (att & SYN_MK)
 		return "\x1b[m";
@@ -195,7 +230,7 @@ char *term_att(int att)
 	if (att & SYN_RV)
 		{*s++ = ';'; *s++ = '7';}
 	if (SYN_FGSET(att)) {
-		int fg = SYN_FG(att);
+		s64 fg = SYN_FG(att);
 		*s++ = ';';
 		if (fg < 8)
 			s = itoa(30 + fg, s);
@@ -203,7 +238,7 @@ char *term_att(int att)
 			s = itoa(fg, (char*)memcpy(s, "38;5;", 5)+5);
 	}
 	if (SYN_BGSET(att)) {
-		int bg = SYN_BG(att);
+		s64 bg = SYN_BG(att);
 		*s++ = ';';
 		if (bg < 8)
 			s = itoa(40 + bg, s);
@@ -215,9 +250,9 @@ char *term_att(int att)
 	return buf;
 }
 
-static int cmd_make(char **argv, int *ifd, int *ofd)
+static s64 cmd_make(char **argv, s64 *ifd, s64 *ofd)
 {
-	int pid;
+	s64 pid;
 	int pipefds0[2] = {-1, -1};
 	int pipefds1[2] = {-1, -1};
 	if (ifd)
@@ -271,20 +306,23 @@ char *xgetenv(char **q)
 }
 
 /* execute a command; pass in input if ibuf and process output if oproc */
-sbuf *cmd_pipe(char *cmd, sbuf *ibuf, int oproc, int *status)
+sbuf *cmd_pipe(char *cmd, sbuf *ibuf, s64 oproc, s64 *status)
 {
+	s64 terminal = !ibuf && term_sbuf;
+	if (agent_tool)
+		return agent_shell(cmd, ibuf, oproc, status);
 	static char *sh[] = {"$SHELL", "sh", NULL};
 	struct pollfd fds[3];
 	char buf[512];
-	int ifd = -1, ofd = -1;
-	int nw = 0;
+	s64 ifd = -1, ofd = -1;
+	s64 nw = 0;
 	char *argv[5];
 	argv[0] = xgetenv(sh);
 	argv[1] = xish ? "-i" : argv[0];
 	argv[2] = "-c";
 	argv[3] = cmd;
 	argv[4] = NULL;
-	int pid = cmd_make(argv+!xish, ibuf ? &ifd : NULL, oproc ? &ofd : NULL);
+	s64 pid = cmd_make(argv+!xish, ibuf ? &ifd : NULL, oproc ? &ofd : NULL);
 	if (pid <= 0)
 		return NULL;
 	sbuf *sb;
@@ -302,7 +340,7 @@ sbuf *cmd_pipe(char *cmd, sbuf *ibuf, int oproc, int *status)
 	fds[2].events = POLLIN;
 	while ((fds[0].fd >= 0 || fds[1].fd >= 0) && poll(fds, 3, 200) >= 0) {
 		if (fds[0].revents & POLLIN) {
-			int ret = read(fds[0].fd, buf, sizeof(buf));
+			s64 ret = read(fds[0].fd, buf, sizeof(buf));
 			if (ret > 0 && oproc == 2)
 				term_write(buf, ret)
 			if (ret > 0)
@@ -316,7 +354,7 @@ sbuf *cmd_pipe(char *cmd, sbuf *ibuf, int oproc, int *status)
 			fds[0].fd = -1;
 		}
 		if (fds[1].revents & POLLOUT && ibuf) {
-			int ret = write(fds[1].fd, ibuf->s + nw, ibuf->s_n - nw);
+			s64 ret = write(fds[1].fd, ibuf->s + nw, ibuf->s_n - nw);
 			if (ret > 0)
 				nw += ret;
 			if (ret <= 0 || nw == ibuf->s_n) {
@@ -328,8 +366,8 @@ sbuf *cmd_pipe(char *cmd, sbuf *ibuf, int oproc, int *status)
 			fds[1].fd = -1;
 		}
 		if (fds[2].revents & POLLIN) {
-			int ret = read(fds[2].fd, buf, sizeof(buf));
-			for (int i = 0; i < ret; i++)
+			s64 ret = read(fds[2].fd, buf, sizeof(buf));
+			for (s64 i = 0; i < ret; i++)
 				if ((unsigned char) buf[i] == TK_CTL('c'))
 					kill(pid, SIGINT);
 		} else if (fds[2].revents & (POLLERR | POLLHUP | POLLNVAL))
@@ -339,12 +377,15 @@ sbuf *cmd_pipe(char *cmd, sbuf *ibuf, int oproc, int *status)
 		close(ofd);
 	if (fds[1].fd >= 0)
 		close(ifd);
-	waitpid(pid, status, 0);
+	int wst = 0;
+	waitpid(pid, &wst, 0);
+	if (status)
+		*status = wst;
 	signal(SIGTTOU, SIG_IGN);
 	tcsetpgrp(term_ufd.fd, getpgrp());
 	signal(SIGTTOU, SIG_DFL);
 	if (!ibuf) {
-		if (term_sbuf)
+		if (terminal)
 			term_init();
 		signal(SIGINT, SIG_DFL);
 	}

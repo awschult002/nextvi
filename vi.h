@@ -1,7 +1,10 @@
 /* vi.h: shared definitions across files */
+#include <stdint.h>
+typedef uint64_t u64;
+typedef int64_t s64;
 
 /* helper macros */
-#define LEN(a)		(int)(sizeof(a) / sizeof((a)[0]))
+#define LEN(a)		(s64)(sizeof(a) / sizeof((a)[0]))
 #define MIN(a, b)	((a) < (b) ? (a) : (b))
 #define MAX(a, b)	((a) < (b) ? (b) : (a))
 /* for debug; printf() but to file */
@@ -38,16 +41,16 @@ static void *erealloc(void *p, size_t size)
 	return p;
 }
 
-static int dstrlen(const char *s, char delim)
+static s64 dstrlen(const char *s, char delim)
 {
 	register const char *i;
 	for (i=s; *i && *i != delim; ++i);
 	return i-s;
 }
 
-static char *itoa(int n, char s[])
+static char *itoa(s64 n, char s[])
 {
-	int i = 0, sign;
+	s64 i = 0, sign;
 	if ((sign = n) < 0)		/* record sign */
 		n = -n;			/* make n positive */
 	do {				/* generate digits in reverse order */
@@ -65,16 +68,16 @@ static char *itoa(int n, char s[])
 	}
 	return &s[i];
 }
-static char *sdup(const char *s, int n) { n++; return memcpy(emalloc(n), s, n); }
-static int itoalen(int n) { char s[32]; return itoa(n, s) - s; }
-static void swap(int *a, int *b) { int t = *a; *a = *b; *b = t; }
+static char *sdup(const char *s, s64 n) { n++; return memcpy(emalloc(n), s, n); }
+static s64 itoalen(s64 n) { char s[32]; return itoa(n, s) - s; }
+static void swap(s64 *a, s64 *b) { s64 t = *a; *a = *b; *b = t; }
 
 /* sbuf: variable-sized buffer/string */
 #define NEXTSZ(o, r)	o + r + ((o + r) >> 1)
 typedef struct sbuf {
 	char *s;	/* allocated buffer */
-	int s_n;	/* length of the string stored in s[] */
-	int s_sz;	/* size of memory allocated for s[] */
+	s64 s_n;	/* length of the string stored in s[] */
+	s64 s_sz;	/* size of memory allocated for s[] */
 } sbuf;
 
 #define _sbuf_make(sb, newsz, alloc) \
@@ -112,8 +115,8 @@ mem##func(sb->s + sb->s_n, x, len); \
 #define sbuf_smake(sb, newsz) sbuf _##sb, *sb = &_##sb; _sbuf_make(sb, newsz,)
 #define sbuf_make(sb, newsz) { _sbuf_make(sb, newsz, sb = emalloc(sizeof(*sb));) }
 #define sbuf_free(sb) { free(sb->s); free(sb); }
-#define sbuf_set(sb, ch, len) { int __l_ = len; sbuf_(sb, ch, __l_, set) sb->s_n += __l_; }
-#define sbuf_mem(sb, s, len) { int __l_ = len; sbuf_(sb, s, __l_, cpy) sb->s_n += __l_; }
+#define sbuf_set(sb, ch, len) { s64 __l_ = len; sbuf_(sb, ch, __l_, set) sb->s_n += __l_; }
+#define sbuf_mem(sb, s, len) { s64 __l_ = len; sbuf_(sb, s, __l_, cpy) sb->s_n += __l_; }
 #define sbuf_str(sb, s) { sbuf_mem(sb, s, strlen(s)) }
 #define sbuf_cut(sb, len) { sb->s_n = len; }
 /* sbuf functions that nul-terminate strings */
@@ -135,94 +138,111 @@ mem##func(sb->s + sb->s_n, x, len); \
 typedef struct rcode rcode;
 struct rcode {
 	rcode **la;		/* lookahead expressions */
-	int laidx;		/* lookahead index */
-	int unilen;		/* number of integers in insts */
-	int len;		/* number of atoms/instructions */
-	int sub;		/* interim val = save count; final val = nsubs size */
-	int presub;		/* interim val = save count; final val = 1 rsub size */
-	int splits;		/* number of split insts */
-	int sparsesz;		/* sdense size */
-	int flg;		/* stored flags */
-	int insts[];		/* re code */
+	s64 laidx;		/* lookahead index */
+	s64 unilen;		/* number of integers in insts */
+	s64 len;		/* number of atoms/instructions */
+	s64 sub;		/* interim val = save count; final val = nsubs size */
+	s64 presub;		/* interim val = save count; final val = 1 rsub size */
+	s64 splits;		/* number of split insts */
+	s64 sparsesz;		/* sdense size */
+	s64 flg;		/* stored flags */
+	s64 insts[];		/* re code */
 };
 /* regular expression set */
 typedef struct {
 	rcode *regex;		/* the combined regular expression */
-	int *grp;		/* subgroup index */
-	int *grpnsubc;		/* sub count in each subgroup */
-	int nsubc;		/* total sub count */
-	int n;			/* number of regular expressions in this set */
+	s64 *grp;		/* subgroup index */
+	s64 *grpnsubc;		/* sub count in each subgroup */
+	s64 nsubc;		/* total sub count */
+	s64 n;			/* number of regular expressions in this set */
 } rset;
-rset *rset_make(int n, char **pat, int flg);
-rset *rset_smake(char *pat, int flg);
-int rset_find(rset *re, char *s, int *grps, int flg);
-int rset_match(rset *rs, char *s, int flg);
+typedef struct {
+	rset *rs;		/* only for regex patterns */
+	char *str;		/* for simple, non-regex patterns  */
+	s64 len;		/* str length */
+	s64 flg;		/* flags */
+	s64 lbeg, lend;		/* match line beg/end */
+	s64 wbeg, wend;		/* match word beg/end */
+} rstr;
+rset *rset_make(s64 n, char **pat, s64 flg);
+rset *rset_smake(char *pat, s64 flg);
+s64 rset_find(rset *re, char *s, s64 *grps, s64 flg);
+s64 rset_match(rset *rs, char *s, s64 flg);
 void rset_free(rset *re);
+rstr *rstr_make(char *re, s64 flg);
+s64 rstr_find(rstr *rs, char *s, s64 *grps, s64 flg);
+s64 rstr_match(rstr *rs, char *s, s64 flg);
+void rstr_free(rstr *rs);
 
 /* lbuf.c: line buffer */
 struct lopt {
 	char **ins;		/* inserted lines */
 	char **del;		/* deleted lines */
-	int *mark;		/* saved marks */
-	int mark_n;		/* number of saved marks */
-	int mark_sb[2];		/* saved [ mark row & off */
-	int mark_se[2];		/* saved ] mark row & off */
-	int pos, pos_off;	/* modification location */
-	int n_ins, n_del;	/* modification range */
-	int seq;		/* operation number */
-	int ref;		/* ins/del ref exists on lbuf */
+	s64 *mark;		/* saved marks */
+	s64 mark_n;		/* number of saved marks */
+	s64 mark_sb[2];		/* saved [ mark row & off */
+	s64 mark_se[2];		/* saved ] mark row & off */
+	s64 pos, pos_off;	/* modification location */
+	s64 n_ins, n_del;	/* modification range */
+	s64 seq;		/* operation number */
+	s64 ref;		/* ins/del ref exists on lbuf */
 };
 struct linfo {
-	int len;
-	int grec;
+	s64 len;
+	s64 grec;
 };
+struct ts_state;
 struct lbuf {
+	struct ts_state *ts;
+	unsigned long ts_revision;
 	char **ln;			/* buffer lines */
 	struct lopt *hist;		/* buffer history */
-	int *mark;			/* mark id, row & off triplets */
-	int mark_n;			/* number of marks in mark[] */
-	int mark_sb[2];			/* [ mark row & off */
-	int mark_se[2];			/* ] mark row & off */
-	int tmp_mark[4];		/* aux mark state */
-	int ln_n;			/* number of lines in ln[] */
-	int ln_sz;			/* size of ln[] */
-	int useq;			/* current operation sequence */
-	int modified;			/* modification state */
-	int saved;			/* save state */
-	int hist_sz;			/* size of hist[] */
-	int hist_n;			/* current history head in hist[] */
-	int hist_u;			/* current undo head in hist[] */
+	s64 *mark;			/* mark id, row & off triplets */
+	s64 mark_n;			/* number of marks in mark[] */
+	s64 mark_sb[2];			/* [ mark row & off */
+	s64 mark_se[2];			/* ] mark row & off */
+	s64 tmp_mark[4];		/* aux mark state */
+	s64 ln_n;			/* number of lines in ln[] */
+	s64 ln_sz;			/* size of ln[] */
+	s64 useq;			/* current operation sequence */
+	s64 modified;			/* modification state */
+	s64 saved;			/* save state */
+	s64 hist_sz;			/* size of hist[] */
+	s64 hist_n;			/* current history head in hist[] */
+	s64 hist_u;			/* current undo head in hist[] */
+	s64 edseq;			/* monotonic content mutation counter */
 };
 #define lbuf_len(lb) lb->ln_n
 #define lbuf_s(ln) ((struct linfo*)(ln - sizeof(struct linfo)))
 #define lbuf_i(lb, pos) ((struct linfo*)(lb->ln[pos] - sizeof(struct linfo)))
 struct lbuf *lbuf_make(void);
 void lbuf_free(struct lbuf *lb);
-int lbuf_rd(struct lbuf *lb, int fd, int beg, int end);
-int lbuf_wr(struct lbuf *lb, int fd, int beg, int end);
-void lbuf_edit(struct lbuf *lb, char *s, int beg, int end, int o1, int o2);
-void lbuf_region(struct lbuf *lb, sbuf *sb, int r1, int o1, int r2, int o2);
-int lbuf_pos2off(struct lbuf *lb, int r1, int o1, int r2, int o2, int row, int off);
-int lbuf_off2pos(struct lbuf *lb, int r1, int o1, int r2, int o2, int boff, int *row, int *off);
-char *lbuf_joinsb(struct lbuf *lb, int r1, int r2, sbuf *i, int *o1, int *o2);
-int lbuf_join(struct lbuf *lb, int beg, int end, int o1, int *o2, int flg);
-char *lbuf_get(struct lbuf *lb, int pos);
-void lbuf_smark(struct lbuf *lb, struct lopt *lo, int beg, int o1);
-void lbuf_emark(struct lbuf *lb, struct lopt *lo, int end, int o2);
-struct lopt *lbuf_opt(struct lbuf *lb, int beg, int o1, int n_del);
-void lbuf_mark(struct lbuf *lb, int mk, int pos, int off);
-int lbuf_jump(struct lbuf *lb, int mk, int *pos, int *off);
-int lbuf_undo(struct lbuf *lb, int *row, int *off);
-int lbuf_redo(struct lbuf *lb, int *row, int *off);
-void lbuf_saved(struct lbuf *lb, int clear);
-int lbuf_indents(struct lbuf *lb, int r);
-int lbuf_eol(struct lbuf *lb, int r, int state);
-int lbuf_next(struct lbuf *lb, int dir, int *r, int *o);
-int lbuf_findchar(struct lbuf *lb, char *cs, int cmd, int n, int *r, int *o);
-int lbuf_search(struct lbuf *lb, rset *re, int dir, int beg, int end, int pskip,
-		int nskip, int *r, int *o);
+s64 lbuf_rd(struct lbuf *lb, s64 fd, s64 beg, s64 end);
+s64 lbuf_wr(struct lbuf *lb, s64 fd, s64 beg, s64 end);
+void lbuf_edit(struct lbuf *lb, char *s, s64 beg, s64 end, s64 o1, s64 o2);
+void lbuf_region(struct lbuf *lb, sbuf *sb, s64 r1, s64 o1, s64 r2, s64 o2);
+s64 lbuf_pos2off(struct lbuf *lb, s64 r1, s64 o1, s64 r2, s64 o2, s64 row, s64 off);
+s64 lbuf_off2pos(struct lbuf *lb, s64 r1, s64 o1, s64 r2, s64 o2, s64 boff, s64 *row, s64 *off);
+char *lbuf_joinsb(struct lbuf *lb, s64 r1, s64 r2, sbuf *i, s64 *o1, s64 *o2);
+s64 lbuf_join(struct lbuf *lb, s64 beg, s64 end, s64 o1, s64 *o2, s64 flg);
+char *lbuf_get(struct lbuf *lb, s64 pos);
+void lbuf_smark(struct lbuf *lb, struct lopt *lo, s64 beg, s64 o1);
+void lbuf_emark(struct lbuf *lb, struct lopt *lo, s64 end, s64 o2);
+struct lopt *lbuf_opt(struct lbuf *lb, s64 beg, s64 o1, s64 n_del);
+void lbuf_mark(struct lbuf *lb, s64 mk, s64 pos, s64 off);
+s64 lbuf_jump(struct lbuf *lb, s64 mk, s64 *pos, s64 *off);
+s64 lbuf_undo(struct lbuf *lb, s64 *row, s64 *off);
+s64 lbuf_redo(struct lbuf *lb, s64 *row, s64 *off);
+void lbuf_saved(struct lbuf *lb, s64 clear);
+s64 lbuf_indents(struct lbuf *lb, s64 r);
+s64 lbuf_eol(struct lbuf *lb, s64 r, s64 state);
+s64 lbuf_next(struct lbuf *lb, s64 dir, s64 *r, s64 *o);
+s64 lbuf_findchar(struct lbuf *lb, char *cs, s64 cmd, s64 n, s64 *r, s64 *o);
+s64 lbuf_search(struct lbuf *lb, rstr *re, s64 dir, s64 beg, s64 end, s64 pskip,
+		s64 nskip, s64 *r, s64 *o);
+
 #define lbuf_dedup(lb, str, n) \
-{ for (int i = 0; i < lbuf_len(lb);) { \
+{ for (s64 i = 0; i < lbuf_len(lb);) { \
 	char *s = lbuf_get(lb, i); \
 	if (n == lbuf_s(s)->len && !memcmp(str, s, n)) \
 		lbuf_edit(lb, NULL, i, i + 1, 0, 0); \
@@ -231,43 +251,44 @@ int lbuf_search(struct lbuf *lb, rset *re, int dir, int beg, int end, int pskip,
 }} \
 
 /* regions */
-int lbuf_sectionbeg(struct lbuf *lb, int dir, int *row, int *off, int ch);
-int lbuf_wordbeg(struct lbuf *lb, int big, int dir, int *row, int *off);
-int lbuf_wordend(struct lbuf *lb, int big, int dir, int *row, int *off);
-int lbuf_pair(struct lbuf *lb, char *pairs, int plen, int *row, int *off);
+s64 lbuf_sectionbeg(struct lbuf *lb, s64 dir, s64 *row, s64 *off, s64 ch);
+s64 lbuf_wordbeg(struct lbuf *lb, s64 big, s64 dir, s64 *row, s64 *off);
+s64 lbuf_wordend(struct lbuf *lb, s64 big, s64 dir, s64 *row, s64 *off);
+s64 lbuf_pair(struct lbuf *lb, char *pairs, s64 plen, s64 *row, s64 *off);
 
 /* ren.c: rendering lines */
 typedef struct {
 	char **chrs;
 	char *s;	/* to prevent redundant computations, ensure pointer uniqueness */
-	int *wid;
-	int *col;
-	int *pos;
-	int n;
-	int cmax;
-	int ctx;
-	int holelen;
+	s64 *wid;
+	s64 *col;
+	s64 *pos;
+	s64 n;
+	s64 cmax;
+	s64 ctx;
+	s64 holelen;
 	char nulhole[4];
 } ren_state;
 extern ren_state rstates[3];
-extern ren_state *rstate;
+extern __thread ren_state *rstate;
 #define RST(n, func) { rstate = rstates+n; rstate->s = NULL; func; rstate -= n; }
 #define RST_NULL(...) { \
-	int i_[] = {__VA_ARGS__}; \
-	for (int j_ = 0; j_ < LEN(i_); j_++) \
+	s64 i_[] = {__VA_ARGS__}; \
+	for (s64 j_ = 0; j_ < LEN(i_); j_++) \
 		rstates[i_[j_]].s = NULL; \
 } \
 
 ren_state *ren_position(char *s);
-int ren_next(char *s, int p, int dir);
-int ren_eol(char *s, int dir);
-int ren_pos(char *s, int off);
-int ren_cursor(char *s, int pos);
-int ren_noeol(char *s, int p);
-int ren_off(char *s, int p);
+s64 ren_next(char *s, s64 p, s64 dir);
+s64 ren_eol(char *s, s64 dir);
+s64 ren_pos(char *s, s64 off);
+s64 ren_cursor(char *s, s64 pos);
+s64 ren_noeol(char *s, s64 p);
+s64 ren_off(char *s, s64 p);
+s64 ren_wrapw(s64 lncol);
 char *ren_translate(char *s, char *ln);
 /* text direction */
-int dir_context(char *s);
+s64 dir_context(char *s);
 void dir_init(void);
 /* syntax highlighting */
 #define SYN_BD		0x10000
@@ -300,23 +321,25 @@ void dir_init(void);
 #define SYN_BEDP	0x40		/* grp block highlight end direction pass */
 #define SYN_BN		0x80		/* grp block highlight nests into itself */
 #define SYN_SET(flg, a) (a & SYN_##flg)
-extern int ftidx;
-extern int syn_scdirl;
-extern int syn_blockhl;
+extern s64 ftidx;
+extern s64 syn_scdirl;
+extern s64 syn_blockhl;
+char *syn_getft(void);
 char *syn_setft(char *ft);
-void syn_scdir(int scdir);
-void syn_highlight(int *att, char *s, int n);
+void syn_scdir(s64 scdir);
+void syn_highlight(s64 *att, char *s, s64 n);
 char *syn_filetype(char *path);
-int syn_merge(int old, int new);
-void syn_reloadft(int hl, int flg);
-int syn_findhl(int id);
-int syn_addhl(char *reg, int id);
+s64 syn_merge(s64 old, s64 new);
+void syn_reloadft(s64 hl, s64 flg);
+s64 syn_findhl(s64 id);
+s64 syn_addhl(char *reg, s64 id);
 void syn_init(void);
 
 /* uc.c: utf-8 helper functions */
-extern unsigned char utf8_length[256];
-extern int zwlen, def_zwlen;
-extern int bclen, def_bclen;
+extern unsigned char _utf8_length[256];
+extern unsigned char *utf8_length;
+extern s64 zwlen, def_zwlen;
+extern s64 bclen, def_bclen;
 /* the length of a given utf-8 character */
 #define uc_len(s) utf8_length[(unsigned char)(s)[0]]
 /* the unicode codepoint of a given utf-8 character */
@@ -334,34 +357,34 @@ else if (l == 4) \
 else \
 	dst = 0; \
 
-int uc_wid(int c);
-int uc_slen(char *s);
-char *uc_chrn(char *s, int off, int *n);
-char *uc_chr(char *s, int off);
-int uc_off(char *s, int off);
-char *uc_subl(char *s, int beg, int end, int *rlen);
-char *uc_sub(char *s, int beg, int end);
+s64 uc_wid(s64 c);
+s64 uc_slen(char *s);
+char *uc_chrn(char *s, s64 off, s64 *n);
+char *uc_chr(char *s, s64 off);
+s64 uc_off(char *s, s64 off);
+char *uc_subl(char *s, s64 beg, s64 end, s64 *rlen);
+char *uc_sub(char *s, s64 beg, s64 end);
 #define uc_isspace(c) ((unsigned char)(c) == ' ' || (unsigned char)((unsigned char)(c) - 9) < 5)
 #define uc_isprint(c) ((unsigned char)(c) >= 0x20 && (unsigned char)(c) != 0x7f)
 #define uc_isdigit(c) (((unsigned char)(c) ^ '0') < 10)
 #define uc_isalpha(c) ((unsigned char)(c) > 0x7f || (unsigned char)(((unsigned char)(c) | 0x20) - 'a') < 26)
 #define uc_isupper(c) ((unsigned char)((unsigned char)(c) - 'A') < 26)
-int uc_kind(char *c);
-int uc_isbell(int c);
-int uc_acomb(int c);
+s64 uc_kind(char *c);
+s64 uc_isbell(s64 c);
+s64 uc_acomb(s64 c);
 char *uc_beg(char *beg, char *s);
-char *uc_shape(char *beg, char *s, int c);
+char *uc_shape(char *beg, char *s, s64 c);
 
 /* term.c: managing the terminal */
 extern struct pollfd term_ufd;
 extern sbuf *term_sbuf;
-extern int term_record;
-extern int term_winch;
-extern int term_resized;
-extern int xrows, xcols;
-extern unsigned int tibuf_pos, tibuf_cnt, tibuf_sz, ticmd_pos;
+extern s64 term_record;
+extern s64 term_winch;
+extern s64 term_resized;
+extern s64 xrows, xcols;
+extern u64 tibuf_pos, tibuf_cnt, tibuf_sz, ticmd_pos;
 extern unsigned char *tibuf, ticmd[4096];
-extern unsigned int texec, texec_n;
+extern u64 texec, texec_n;
 #define term_write(s, n) if (xled) write(1, s, n);
 void term_init(void);
 void term_done(void);
@@ -369,22 +392,22 @@ void term_clean(void);
 void term_suspend(void);
 #define term_scrl()	term_write("\033[?1049l", 8)
 #define term_scrh()	term_write("\033[?1049h", 8)
-void term_chr(int ch);
-void term_pos(int r, int c);
+void term_chr(s64 ch);
+void term_pos(s64 r, s64 c);
 void term_kill(void);
-void term_room(int n);
-int term_read(int winch);
+void term_room(s64 n);
+s64 term_read(s64 winch);
 void term_commit(void);
-char *term_att(int att);
-void term_push(char *s, unsigned int n);
+char *term_att(s64 att);
+void term_push(char *s, u64 n);
 #define term_dec() tibuf_pos--; ticmd_pos--;
 #define term_exec(s, n, type) \
 { \
-	preserve(int, texec_n, texec_n = 0;) \
-	preserve(int, tibuf_cnt,) \
-	preserve(int, tibuf_pos, tibuf_pos = tibuf_cnt;) \
+	preserve(s64, texec_n, texec_n = 0;) \
+	preserve(s64, tibuf_cnt,) \
+	preserve(s64, tibuf_pos, tibuf_pos = tibuf_cnt;) \
 	term_push(s, n); \
-	preserve(int, texec, texec = type;) \
+	preserve(s64, texec, texec = type;) \
 	vi(0); \
 	restore(texec) \
 	if (xquit > 0) \
@@ -395,7 +418,7 @@ void term_push(char *s, unsigned int n);
 } \
 
 /* process management */
-sbuf *cmd_pipe(char *cmd, sbuf *ibuf, int oproc, int *status);
+sbuf *cmd_pipe(char *cmd, sbuf *ibuf, s64 oproc, s64 *status);
 char *xgetenv(char* q[]);
 
 #define TK_ESC		TK_CTL('[')
@@ -404,38 +427,38 @@ char *xgetenv(char* q[]);
 
 /* led.c: line-oriented input and output */
 typedef struct {	/* led_render() state, passed to every extension */
-	int *att;
-	int *off;
-	int *stt;
-	int *ctt;
+	s64 *att;
+	s64 *off;
+	s64 *stt;
+	s64 *ctt;
 	char *s0;
 	char *bound;
 	ren_state *r;
-	int alen;	/* number of valid att[] entries */
-	int cterm;
-	int n;
+	s64 alen;	/* number of valid att[] entries */
+	s64 cterm;
+	s64 n;
 } led_ctx;
 typedef struct led_ext led_ext;
 struct led_ext {					/* a syntax highlighting extension */
 	char *ln;					/* line key; NULL matches any line */
 	void *usr;					/* data interpreted by the extension */
 	void (*ext_func)(led_ext *p, led_ctx *x);	/* extension body defaults to ext_attmerge() */
-	int blen;					/* byte length of usr */
+	s64 blen;					/* byte length of usr */
 };
 led_ext *led_extnew(void);
 led_ext *led_extreg(void);
 led_ext *led_extfind(void (*ext_func)(led_ext *p, led_ctx *x));
 void led_extdel(led_ext *p);
 void led_extcut(void);
-int led_attidx(led_ctx *x, int off);
+s64 led_attidx(led_ctx *x, s64 off);
 /* for extensions that key themselves */
 #define led_extkey(p, x) (!(p)->ln || (p)->ln == (x)->s0)
 void led_modeswap(void);
 typedef struct {
-	int t_row;
-	int p_reg;
-	int lsug;
-	int sug_pt;
+	s64 t_row;
+	s64 p_reg;
+	s64 lsug;
+	s64 sug_pt;
 	char *sug;
 	char *_sug;
 } ins_state;
@@ -447,12 +470,44 @@ is.sug_pt = -1; \
 is.sug = NULL; \
 is._sug = NULL; \
 
-int led_prompt(sbuf *sb, char *insert, int *kmap, ins_state *is, int ps, int flg);
-int led_input(sbuf *sb, char *post, int postn, int row, int flg, int *pren);
-void led_render(char *s0, int cbeg, int cend);
+#define LED_AGENT 8 /* return control keys to the conversation prompt */
+s64 led_prompt(sbuf *sb, char *insert, s64 *kmap, ins_state *is, s64 ps, s64 flg);
+s64 led_input(sbuf *sb, char *post, s64 postn, s64 row, s64 flg, s64 *pren,
+	s64 source_beg, s64 source_end);
+void led_render(char *s0, s64 cbeg, s64 cend);
+void led_render_source(char *s0, s64 cbeg, s64 cend, struct ts_state *source,
+	s64 row, s64 col);
+void ts_init(void);
+void ts_done(void);
+void ts_free(struct ts_state *s);
+void ts_forget(struct lbuf *lb);
+void ts_edit(struct lbuf *lb, s64 row, s64 del, char **lines, s64 ins);
+struct ts_state *ts_document(struct lbuf *lb);
+struct ts_state *ts_preview_begin(struct lbuf *lb, s64 beg, s64 end);
+s64 ts_preview_update(struct ts_state *s, char *text);
+char *ts_line(struct ts_state *s, s64 row);
+extern struct ts_state *ts_preview;
+extern s64 ts_redraw;
+static void led_preview_current(char *text, s64 ps, s64 lncol);
+static s64 ts_preview_row(s64 ps);
+#define ts_winy 0
+#define ts_winx 0
+#define ts_winh xrows
+#define ts_winw xcols
+#define led_srender(msg, sr, sc, beg, end, view, row, col) \
+{ \
+	s64 record = term_record; \
+	term_record = 1; \
+	term_pos(sr, sc); \
+	term_kill(); \
+	led_render_source(msg, beg, end, view, row, col); \
+	if (!record) \
+		term_commit(); \
+} \
+
 #define _led_render(msg, row, col, beg, end, kill) \
 { \
-	int record = term_record; \
+	s64 record = term_record; \
 	term_record = 1; \
 	term_pos(row, col); \
 	kill \
@@ -463,8 +518,9 @@ void led_render(char *s0, int cbeg, int cend);
 
 #define led_prender(msg, row, col, beg, end) _led_render(msg, row, col, beg, end,)
 #define led_crender(msg, row, col, beg, end) _led_render(msg, row, col, beg, end, term_kill();)
-char *led_read(int *kmap, int c);
-int led_pos(char *s, int pos);
+char *led_read(s64 *kmap, s64 c);
+extern s64 led_row;
+s64 led_pos(char *s, s64 pos);
 void led_done(void);
 
 /* ex.c: command mode */
@@ -472,55 +528,65 @@ struct buf {
 	char *ft;			/* file type */
 	char *path;			/* file path */
 	struct lbuf *lb;
-	int plen, row, off, top;
+	s64 plen, row, off, top, topsub;
 	long mtime;			/* modification time */
 	signed char td;			/* text direction */
+	s64 et;				/* expandtab - use spaces for indentation */
+	s64 sw;				/* shiftwidth - indentation step */
+	s64 ts;				/* tabspace - number of spaces for tab */
 };
 /* ex options */
-extern int xleft;
-extern int xvis;
-extern int xai;
-extern int xic;
-extern int xhl;
-extern int xhll;
-extern int xhlw;
-extern int xhlp;
-extern int xhlr;
-extern int xled;
-extern int xtd;
-extern int xshape;
-extern int xorder;
-extern int xts;
-extern int xish;
-extern int xgrp;
-extern int xpac;
-extern int xmpt;
-extern int xpr;
-extern int xlim;
-extern int xseq;
-extern int xerr;
-extern int xfr;
-extern int xrr;
+extern s64 xleft;
+extern s64 xvis;
+extern s64 xai;
+extern s64 xic;
+extern s64 xhl;
+extern s64 xhll;
+extern s64 xhlw;
+extern s64 xhlp;
+extern s64 xhlr;
+extern s64 xled;
+extern s64 xtd;
+extern s64 xshape;
+extern s64 xorder;
+extern s64 xts;
+extern s64 xet;
+extern s64 xsw;
+extern s64 xidt;
+extern s64 xish;
+extern s64 xgrp;
+extern s64 xaspec;
+extern s64 xpac;
+extern s64 xtc;
+extern s64 xmpt;
+extern s64 xpr;
+extern s64 xlim;
+extern s64 xlw;
+extern s64 xhllw;
+extern s64 xseq;
+extern s64 xerr;
+extern s64 xfr;
+extern s64 xrr;
 /* global variables */
-extern int xquit;
-extern int xrow, xoff, xtop;
-extern int xbufcur;
-extern int xgrec;
-extern int xkmap;
-extern int xkmap_alt;
-extern int xkwddir;
-extern int xkwdcnt;
-extern int xpln;
-extern int xsep;
-extern int xesc;
-extern int xexec_dep;
+extern s64 xquit;
+extern s64 xrow, xoff, xtop, xtopsub;
+extern s64 xbufcur;
+extern s64 xgrec;
+extern s64 xkmap;
+extern s64 xkmap_alt;
+extern s64 xkwddir;
+extern s64 xkwdcnt;
+extern s64 xpln;
+extern s64 xsep;
+extern s64 xesc;
+extern s64 xexec_dep;
 extern sbuf *xacreg;
-extern rset *xkwdrs;
+extern rstr *xkwdrs;
 extern sbuf **xregs;
-extern int xregs_n;
-extern int xdefreg;
+extern s64 xregs_n;
+extern s64 xdefreg;
 extern struct buf *bufs;
-extern struct buf tempbufs[3];
+extern struct buf tempbufs[5];
 extern struct buf *ex_buf;
 extern struct buf *ex_pbuf;
 #define istempbuf(buf) (buf >= tempbufs && buf < tempbufs + LEN(tempbufs))
@@ -531,92 +597,131 @@ extern struct buf *ex_pbuf;
 	xrow = buf->row; \
 	xoff = buf->off; \
 	xtop = buf->top; \
+	xtopsub = buf->topsub; \
 	xtd = buf->td; \
+	xet = buf->et; \
+	xsw = buf->sw; \
+	xts = buf->ts; \
 
 #define exbuf_save(buf) \
 	buf->row = xrow; \
 	buf->off = xoff; \
 	buf->top = xtop; \
+	buf->topsub = xtopsub; \
 	buf->td = xtd; \
+	buf->et = xet; \
+	buf->sw = xsw; \
+	buf->ts = xts; \
 
 #define bufs_switchwft(idx) \
 { if (&bufs[idx] != ex_buf) { bufs_switch(idx); syn_setft(xb_ft); } } \
 
-void bufs_switch(int idx);
-void temp_open(int i, char *name, char *ft);
-void temp_switch(int i, int swap);
-void temp_write(int i, char *str);
-void temp_pos(int i, int row, int off, int top);
+void bufs_switch(s64 idx);
+void temp_open(s64 i, char *name, char *ft);
+void temp_switch(s64 i, s64 swap);
+void temp_write(s64 i, char *str);
+void temp_pos(s64 i, s64 row, s64 off, s64 top);
 void ex(void);
 void *ex_exec(const char *ln);
 #define ex_command(ln) { ex_exec(ln); ex_regput(':', ln, 0); }
-void ex_cprint(char *line, char *ft, int r, int c, int left, int flg);
+void ex_cprint(char *line, char *ft, s64 r, s64 c, s64 left, s64 flg);
 #define ex_cprint2(line, ft, r, c, left, flg) { RST(2, ex_cprint(line, ft, r, c, left, flg)); }
 #define ex_print(line, ft) { RST(2, ex_cprint(line, ft, -1, 0, 0, 1)); }
-void ex_init(char **files, int n);
-void ex_bufpostfix(struct buf *p, int clear);
-int ex_krs(rset **krs, int *dir);
-void ex_krsset(char *kwd, int dir);
-void ex_regesc(sbuf *sb, char *beg, char *end, int ex);
-int ex_edit(const char *path, int len);
-sbuf *ex_regget(int id);
-void ex_regput(int c, const char *s, int append);
+void ex_init(char **files, s64 n);
+void ex_bufpostfix(struct buf *p, s64 clear);
+s64 ex_krs(rstr **krs, s64 *dir);
+void ex_krsset(char *kwd, s64 dir);
+void ex_regesc(sbuf *sb, char *beg, char *end, s64 ex);
+s64 ex_edit(const char *path, s64 len);
+sbuf *ex_regget(s64 id);
+void ex_regput(s64 c, const char *s, s64 append);
 
 /* conf.c: configuration variables */
-extern const int conf_mode;
+extern const s64 conf_mode;
 /* map file names to file types */
 struct filetype {
 	char *ft;		/* file type */
 	char *pat;		/* file name pattern */
 };
 extern struct filetype fts[];
-extern const int ftslen;
+extern const s64 ftslen;
 /* syntax highlighting patterns */
 struct highlight {
 	char *ft;		/* the filetype of this pattern */
 	char *pat;		/* regular expression */
-	int *att;		/* attributes of the matched groups */
+	s64 *att;		/* attributes of the matched groups */
 	unsigned char set;	/* subset index */
 	unsigned char id;	/* id of this hl */
 };
 extern struct highlight hls[];
-extern const int hlslen;
-extern const int hlopts[];
-extern const int hloptslen;
+extern const s64 hlslen;
+extern const s64 hlopts[];
+extern const s64 hloptslen;
 /* direction context: specifies the direction of a whole line */
 struct dircontext {
 	char *pat;
-	int dir;
+	s64 dir;
 };
 extern struct dircontext dctxs[];
-extern const int dctxlen;
+extern const s64 dctxlen;
 /* direction marks: the direction of patterns in a line */
 struct dirmark {
 	char *pat;
-	int ctx;	/* the direction context for this mark; 0 means any */
-	int dir[8];	/* the direction of a matched text group */
+	s64 ctx;	/* the direction context for this mark; 0 means any */
+	s64 dir[8];	/* the direction of a matched text group */
 };
 extern struct dirmark dmarks[];
-extern const int dmarkslen;
+extern const s64 dmarkslen;
 /* character placeholders */
 struct placeholder {
-	int cp[2];	/* the source character codepoint */
+	s64 cp[2];	/* the source character codepoint */
 	char d[8];	/* the placeholder */
-	int wid;	/* the width of the placeholder */
-	int l;		/* the length of the codepoint */
+	s64 wid;	/* the width of the placeholder */
+	s64 l;		/* the length of the codepoint */
 };
 extern struct placeholder _ph[];
 extern struct placeholder *ph;
-extern int phlen;
-extern const int conf_hlrev;
-char **conf_kmap(int id);
-int conf_kmapfind(char *name);
-char *conf_digraph(int c1, int c2);
+extern s64 phlen;
+extern const s64 conf_hlrev;
+extern char spell_cmd[];
+struct spellft {
+	char *ft;		/* the filetype */
+	char *arg;		/* extra speller arguments for it */
+};
+extern struct spellft spell_fts[];
+extern const s64 spell_ftslen;
+extern const s64 conf_hlmat;
+extern const s64 conf_hlmatc;
+char **conf_kmap(s64 id);
+s64 conf_kmapfind(char *name);
+char *conf_digraph(s64 c1, s64 c2);
 
 /* vi.c: main */
-void vi(int init);
-extern int vi_hidch;
-extern int vi_lncol;
+void vi(s64 init);
+void vi_rendwait(void);
+extern s64 vi_hidch;
+extern s64 vi_lncol;
+/* soft line wrap geometry */
+s64 vi_lnrows(char *s);
+s64 vi_srow(s64 row);
+s64 vi_drawline(s64 row, s64 trow);
 /* filesystem */
-extern rset *fsincl;
+extern rstr *fsincl;
 void dir_calc(char *path);
+
+/* lsp.c */
+#define LSP_NFDS_MAX	8
+extern s64 lsp_nfds;
+extern s64 lsp_dirty;
+extern s64 lsp_wake;
+extern s64 lsp_fds[LSP_NFDS_MAX];
+void lsp_process_fd(s64 fd);
+void lsp_register(const char *ft, const char *cmd);
+void lsp_open(const char *path, const char *ft);
+void lsp_save(const char *path);
+void lsp_sync(const char *path, struct lbuf *lb);
+void lsp_hover(const char *path, s64 row, s64 off);
+void lsp_definition(const char *path, s64 row, s64 off);
+const char *lsp_diag_for_line(const char *path, s64 line, s64 *sev);
+void lsp_list(void);
+void lsp_show_msg(char *msg);
