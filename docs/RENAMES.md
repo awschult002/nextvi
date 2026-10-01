@@ -1,10 +1,10 @@
 # Rename map
 
-Old names from upstream `kyx0r/nextvi` (base `b1c78886`) and their new names. Generated from `scripts/renames-globals.tsv`; replay with `scripts/rename.sh` on a fresh upstream.
+Old names from upstream `kyx0r/nextvi` and their new names. On this branch the base is `patched/upstream-1635521b` (upstream `1635521b` + the patches in `PATCHES.md`); the binary reference for the rename check is `f2aa0fe9…efaf`. The tables were first written against `b1c78886`. Generated from `scripts/renames-globals.tsv`; replay with `scripts/rename.sh` on a fresh upstream.
 
 ### Replaying on a fresh upstream
 
-Run the three tables in this order. `rename.sh` handles the `EO()` macro change itself, so no cherry-pick is needed.
+Apply the patches first (see `PATCHES.md`), then run the three tables in this order. `rename.sh` handles the `EO()` macro change itself, so no cherry-pick is needed.
 
 ```sh
 sh scripts/rename.sh scripts/renames-globals.tsv
@@ -15,7 +15,7 @@ sh ./cbuild.sh
 
 Reruns are safe. A row whose old name is gone and whose new name is present is reported as "already applied" and skipped. If both names are present, that's a real collision, and the script stops before editing anything.
 
-After the last table, `rename.sh` runs `scripts/unmapped.sh`. It lists every `extern` global in `vi.h` that no table renames and that isn't in `scripts/renames-keep.txt` (the names deliberately left alone). After an upstream merge, that list tells you which rows to add. The `LN_*` constants and the Doxygen comments aren't in the tables; they come over by merging their commits.
+After the last table, `rename.sh` runs `scripts/unmapped.sh`. It lists every `extern` global in `vi.h` that no table renames and that isn't in `scripts/renames-keep.txt` (the names deliberately left alone). `scripts/renames-allow.txt` lists known false matches, for example treesitter's `capture_n` struct member, so they aren't flagged as collisions. String literals are never renamed. After an upstream merge, that list tells you which rows to add. The `LN_*` constants and the Doxygen comments aren't in the tables; they come over by merging their commits.
 
 ## Globals (`scripts/renames-globals.tsv`)
 
