@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Wed, 30 Sep 2026 21:40:08 +0000
+Subject: [PATCH] docs(PATCHES): tree-sitter pin, 64bit review fixes, ren.c:133
+ note
+
+---
+ docs/PATCHES.md | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/docs/PATCHES.md b/docs/PATCHES.md
+index 79ae3642..604d9d3f 100644
+--- a/docs/PATCHES.md
++++ b/docs/PATCHES.md
+@@ -48,25 +48,32 @@ Note: a script can exit OK after a failed anchor, having written only part of it
+ | `e8243526` | `spell_cmp` must return `int` for `qsort` |
+ | `83d2a07d` | `ts_capture_cmp` must return `int` for `qsort` |
+ | `37490cd5` | `agent.c`: keep pipe fds, pid, wait status and signal-handler pointers `int` |
++| `4a9dff40` | Pin tree-sitter v0.25.10 at `da6fe9be` and tree-sitter-c v0.24.1 at `7fa1be1b`. Cached and freshly cloned sources must both match the pin with no local changes, or the build fails. |
++| `1c6d0892` | `64bit`: restore the `exspec.h` help text, which is generated from the README. `64bit` had turned `int` into `s64` in the examples and changed ex's `%d` range (delete-all) into `%ld`. |
++| `22b2d5b9` | `64bit`: `term.c` `cmd_pipe` now waits into a local `int`. Before this, `waitpid` wrote only half of a 64-bit status, which worked only because callers zero it first and x86-64 is little-endian. |
+ 
+ ## Build and verification
+ 
+-- `sh ./cbuild.sh build` passes. `-Wall` leaves one warning, at `ren.c:133`, which master plus `64bit` alone also gives.
++- `sh ./cbuild.sh build` passes. `-Wall` leaves one warning, at `ren.c:133`. It's a false positive: it only fires for a line longer than 2^63 characters. The 32-bit code has the same shape, and `64bit` just made GCC's size check notice it.
++- The first build downloads the pinned tree-sitter sources, so builds are reproducible.
+ - Every patch commit was built and given a quick session test.
+ - The final binary passed normal and ex editing, `:wqa`, tab completion, spell replace, and a substitution over 300k lines.
+-- The reference binary for the rename check on this branch is `/workspace/scratch/nextvi-patched-base.bin`. It builds identically every time, and the rename replay is checked against it, not `b1c78886`.
++- The reference binary for the rename check on this branch is `/workspace/scratch/nextvi-patched-base.bin` (sha256 `f2aa0fe9…efaf`, rebuilt at `22b2d5b9`). Two separate builds are byte-identical, and the rename replay is checked against it, not `b1c78886`.
+ 
+ ## Dependencies
+ 
+-- Build: the first build downloads the tree-sitter sources over the network.
++- Build: the first build downloads tree-sitter over the network, pinned to the commits above.
+ - Runtime, all optional: `agent` needs `curl` and a chat endpoint, `lsp` needs a language server (for example `clangd`), and `spell` needs `aspell`.
+ 
++## Reviewed
++
++The `64bit` edits in `lsp.c`, `jsmn.h`, `treesitter.c`, `agent.c` and `term.c` were reviewed line by line. The two real bugs found are fixed above. `-Wformat=2` is clean, and the fd and pid narrowings only carry small values.
++
+ ## Not tested yet
+ 
+ - `lsp` with a real language server
+ - `agent` with a real endpoint
+ - threaded redraw under load (threads share every global in the unity build, so watch for data races)
+-- a line-by-line review of the `64bit` edits in `lsp.c` and `treesitter.c`
+ 
+ ## Available but not applied
+ 

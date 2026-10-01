@@ -1,0 +1,409 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Thu, 1 Oct 2026 01:07:29 +0000
+Subject: [PATCH] scripts: rename tooling
+
+From refactor/readable-names (f6a18725): scripts/rename.sh, unmapped.sh, renames-{globals,term,vi-lnum}.tsv, renames-keep.txt, and docs RENAMES.md, DOXYGEN.md, USAGE.md. docs/ARCHITECTURE.md held back: its unity-build file list predates the patches (no lsp.c, treesitter.c, agent.c, cJSON, jsmn.h, exspec.h) and its identical-binary rule says 'compare against the base commit', where PATCHES.md says to compare against the patched reference binary.
+---
+ docs/DOXYGEN.md             |  36 ++++++++++++
+ docs/RENAMES.md             | 110 ++++++++++++++++++++++++++++++++++++
+ docs/USAGE.md               |  32 +++++++++++
+ scripts/rename.sh           |  51 +++++++++++++++++
+ scripts/renames-globals.tsv |  55 ++++++++++++++++++
+ scripts/renames-keep.txt    |  10 ++++
+ scripts/renames-term.tsv    |  11 ++++
+ scripts/renames-vi-lnum.tsv |   4 ++
+ scripts/unmapped.sh         |  19 +++++++
+ 9 files changed, 328 insertions(+)
+ create mode 100644 docs/DOXYGEN.md
+ create mode 100644 docs/RENAMES.md
+ create mode 100644 docs/USAGE.md
+ create mode 100755 scripts/rename.sh
+ create mode 100644 scripts/renames-globals.tsv
+ create mode 100644 scripts/renames-keep.txt
+ create mode 100644 scripts/renames-term.tsv
+ create mode 100644 scripts/renames-vi-lnum.tsv
+ create mode 100755 scripts/unmapped.sh
+
+diff --git a/docs/DOXYGEN.md b/docs/DOXYGEN.md
+new file mode 100644
+index 00000000..7d52e799
+--- /dev/null
++++ b/docs/DOXYGEN.md
+@@ -0,0 +1,36 @@
++# Comment conventions (Doxygen)
++
++Keep comments short. Explain *why* and *what the pointers point at*; don't restate the code.
++
++## File header (top of every .c/.h)
++```c
++/**
++ * @file lbuf.c
++ * @brief Line buffer: stores the file as an array of lines, with undo marks.
++ */
++```
++
++## Functions
++```c
++/**
++ * @brief Insert text at a row.
++ * @param lb   target line buffer
++ * @param row  row index to insert before (0-based)
++ * @param s    NUL-terminated text, may contain newlines
++ * @return 0 on success, nonzero on failure
++ */
++```
++Static helpers get a one-line `/** @brief ... */` when the name alone isn't enough.
++
++## Globals and struct fields
++Use a trailing `///<` so the comment stays on the same line:
++```c
++int cursor_row;        ///< current cursor row (was xrow)
++```
++
++## Pointer arithmetic
++Don't rewrite it. Put a plain `/* */` note above tricky lines saying what each pointer marks, e.g.
++`/* s: start of current word, r: one past its end */`.
++
++## Rename trail
++Every renamed symbol is listed in `docs/RENAMES.md` (old name, new name, file).
+diff --git a/docs/RENAMES.md b/docs/RENAMES.md
+new file mode 100644
+index 00000000..f0c8f3b3
+--- /dev/null
++++ b/docs/RENAMES.md
+@@ -0,0 +1,110 @@
++# Rename map
++
++Old names from upstream `kyx0r/nextvi` (base `b1c78886`) and their new names. Generated from `scripts/renames-globals.tsv`; replay with `scripts/rename.sh` on a fresh upstream.
++
++### Replaying on a fresh upstream
++
++Run the three tables in this order. `rename.sh` handles the `EO()` macro change itself, so no cherry-pick is needed.
++
++```sh
++sh scripts/rename.sh scripts/renames-globals.tsv
++sh scripts/rename.sh scripts/renames-term.tsv
++sh scripts/rename.sh scripts/renames-vi-lnum.tsv
++sh ./cbuild.sh
++```
++
++Reruns are safe. A row whose old name is gone and whose new name is present is reported as "already applied" and skipped. If both names are present, that's a real collision, and the script stops before editing anything.
++
++After the last table, `rename.sh` runs `scripts/unmapped.sh`. It lists every `extern` global in `vi.h` that no table renames and that isn't in `scripts/renames-keep.txt` (the names deliberately left alone). After an upstream merge, that list tells you which rows to add. The `LN_*` constants and the Doxygen comments aren't in the tables; they come over by merging their commits.
++
++## Globals (`scripts/renames-globals.tsv`)
++
++
++| Old | New | Defined in |
++|---|---|---|
++| `xai` | `opt_autoindent` | ex.c |
++| `xic` | `opt_ignorecase` | ex.c |
++| `xhl` | `opt_syntax_hl` | ex.c |
++| `xhll` | `opt_hl_line` | ex.c |
++| `xhlw` | `opt_hl_word` | ex.c |
++| `xhlp` | `opt_hl_pair` | ex.c |
++| `xhlr` | `opt_hl_reverse` | ex.c |
++| `xled` | `opt_line_editor` | ex.c |
++| `xtd` | `opt_text_dir` | ex.c |
++| `xshape` | `opt_shaping` | ex.c |
++| `xorder` | `opt_reorder` | ex.c |
++| `xts` | `opt_tabstop` | ex.c |
++| `xish` | `opt_interactive_shell` | ex.c |
++| `xgrp` | `opt_search_group` | ex.c |
++| `xpac` | `opt_print_autocomplete` | ex.c |
++| `xmpt` | `opt_multiline_prompt` | ex.c |
++| `xpr` | `opt_print_reg` | ex.c |
++| `xlim` | `opt_render_limit` | ex.c |
++| `xseq` | `opt_undo_seq` | ex.c |
++| `xerr` | `opt_error_mode` | ex.c |
++| `xfr` | `opt_find_reg` | ex.c |
++| `xrr` | `opt_record_reg` | ex.c |
++| `xvis` | `opt_startup_flags` | ex.c |
++| `xleft` | `opt_left_col` | ex.c |
++| `xrow` | `cursor_row` | ex.c |
++| `xoff` | `cursor_off` | ex.c |
++| `xtop` | `view_top_row` | ex.c |
++| `xquit` | `quit_state` | ex.c |
++| `xbufcur` | `buf_count` | ex.c |
++| `xgrec` | `vi_ex_depth` | ex.c |
++| `xexec_dep` | `ex_exec_depth` | ex.c |
++| `xkmap` | `cur_keymap` | ex.c |
++| `xkmap_alt` | `keymap_alt` | ex.c |
++| `xkwddir` | `search_dir` | ex.c |
++| `xkwdcnt` | `search_changes` | ex.c |
++| `xkwdrs` | `search_rset` | ex.c |
++| `xacreg` | `autocomplete_filter` | ex.c |
++| `xpln` | `print_newline` | ex.c |
++| `xsep` | `ex_separator` | ex.c |
++| `xesc` | `ex_escape` | ex.c |
++| `xregs` | `str_registers` | ex.c |
++| `xregs_n` | `str_registers_n` | ex.c |
++| `xdefreg` | `default_reg` | ex.c |
++| `ex_buf` | `cur_buf` | ex.c |
++| `ex_pbuf` | `prev_buf` | ex.c |
++| `xbufsmax` | `bufs_max` | ex.c |
++| `xbufsalloc` | `bufs_alloc` | ex.c |
++| `xgdep` | `global_depth` | ex.c |
++| `xexp` | `ex_expand_char` | ex.c |
++| `xexe` | `ex_shell_char` | ex.c |
++| `xcid` | `capture_status` | ex.c |
++| `xcid_n` | `capture_n` | ex.c |
++| `xcid_keep` | `capture_keep` | ex.c |
++| `xqprop` | `quit_propagate` | ex.c |
++| `xpret` | `ex_prev_ret` | ex.c |
++
++## Terminal globals (`scripts/renames-term.tsv`)
++
++| Old | New | Defined in |
++|---|---|---|
++| `xrows` | `term_rows` | term.c |
++| `xcols` | `term_cols` | term.c |
++| `tibuf` | `term_inbuf` | term.c |
++| `tibuf_pos` | `term_inbuf_pos` | term.c |
++| `tibuf_cnt` | `term_inbuf_count` | term.c |
++| `tibuf_sz` | `term_inbuf_size` | term.c |
++| `tibuf_prev` | `term_inbuf_prev` | term.c |
++| `ticmd` | `term_cmd_keys` | term.c |
++| `ticmd_pos` | `term_cmd_keys_pos` | term.c |
++| `texec` | `term_exec_type` | term.c |
++| `texec_n` | `term_exec_pushed` | term.c |
++
++Notes: `ticmd*` holds the keys kept for `.` repeat. `texec` became `term_exec_type` because `term_exec` is already a function.
++
++## Line-number globals (`scripts/renames-vi-lnum.tsv`)
++
++| Old | New | Defined in |
++|---|---|---|
++| `vi_lnnum` | `lnum_mode` | vi.c |
++| `vi_lncol` | `lnum_width` | vi.c |
++| `vi_rshift` | `hint_row_shift` | vi.c |
++| `lnnum` | `lnum_cur` | vi.c |
++
++`lnum_cur` is the local copy in `vi_drawrow`. The bare 1/2/4/8 mode values are now `LN_ONCE`, `LN_ABS`, `LN_INDENT` and `LN_REL`; see `docs/USAGE.md`.
++
++Other file-local statics in `vi.c`, `ren.c` and `led.c` are not renamed yet.
+diff --git a/docs/USAGE.md b/docs/USAGE.md
+new file mode 100644
+index 00000000..11f94298
+--- /dev/null
++++ b/docs/USAGE.md
+@@ -0,0 +1,32 @@
++# Using nextvi
++
++Short how-tos for features that are easy to miss in the main `README` key table.
++
++## Line numbers
++
++Line numbers are controlled by a count typed before `#`. Each count turns one display mode on or off, and modes can be combined.
++
++| Keys | What you get | Stays on? |
++|---|---|---|
++| `#` | Absolute numbers plus a relative number just before the first non-blank character | **No.** It clears on the next keypress |
++| `2#` | Absolute numbers in the left column | Yes, until you type `2#` again |
++| `4#` | Relative number just before the first non-blank character (it moves with the indent) | Yes, until you type `4#` again |
++| `8#` | Relative numbers in the left column | Yes, until you type `8#` again |
++| `10#` | Absolute and relative numbers in the left column (2 + 8) | Yes, until you type `10#` again |
++
++How the count works: the count is a set of bits (2 = absolute, 4 = relative at the indent, 8 = relative in the left column), so you add them to combine modes. If *any* of those bits is already on, typing the count turns them off. Otherwise it turns them all on. For example, `10#` while `8#` is active turns off both the absolute and relative modes. A bare `#` with any mode already on turns every mode off.
++
++For code with indentation, use `8#` or `10#`. The numbers stay in the left column instead of moving with the indent.
++
++### Turn numbers on at startup
++
++nextvi runs the ex commands in the `EXINIT` environment variable at startup, and the `&` ex command runs a string of vi keys. Add this to your shell rc:
++
++```sh
++export EXINIT='& 8#'    # relative numbers in the left column
++# export EXINIT='& 10#' # absolute + relative
++```
++
++There is no runtime key remapping: key bindings are compiled into the big switch in `vi.c`. `EXINIT` is the way to change startup behavior without patching source.
++
++For developers: the modes are the `LN_*` flags on `lnum_mode` in `vi.c`, drawn by `vi_drawrow`.
+diff --git a/scripts/rename.sh b/scripts/rename.sh
+new file mode 100755
+index 00000000..bcfa394f
+--- /dev/null
++++ b/scripts/rename.sh
+@@ -0,0 +1,51 @@
++#!/bin/sh
++# Replay a whole-word rename table (old<TAB>new per line) over the C sources.
++# Usage: scripts/rename.sh scripts/renames-globals.tsv   (then -term, -vi-lnum)
++#
++# nextvi is a unity build (vi.c #includes every .c), so renames and collision
++# checks always cover every *.c and *.h in the tree.
++# Per row: old present, new absent -> rename; old absent, new present ->
++# "already applied", skipped; both present -> collision, abort (nothing is
++# changed). Also renames tmp<old> locals made by preserve()/restore() in vi.h.
++# If ex.c still has the upstream EO(opt) macro (which pastes x##opt), it is
++# first rewritten to EO(opt, var) so option globals can be renamed.
++set -e
++tbl=$1
++[ -f "$tbl" ] || { echo "usage: $0 table.tsv" >&2; exit 2; }
++cd "$(dirname "$0")/.."
++
++if grep -q 'x##opt' ex.c; then
++	perl -0pi -e 's/#define EO\(opt\) \\\n\t_EO\(opt, x##opt = \*arg \? eo_val\(arg\) : !x##opt; return NULL;\)/#define EO(opt, var) \\\n\t_EO(opt, var = *arg ? eo_val(arg) : !var; return NULL;)/;
++		s/(return NULL;\)\n\n)((?:EO\(\w+\)[ \n]*)+)/my ($h, $b) = ($1, $2); $b =~ s#EO\((\w+)\)#EO($1, x$1)#g; $h . $b/e' ex.c
++	grep -q 'x##opt' ex.c && { echo "EO() macro rewrite failed; see ex.c" >&2; exit 1; }
++	echo "rewrote EO(opt) -> EO(opt, var) in ex.c"
++fi
++
++# Code with comments and string literals blanked, so names in doc comments
++# such as "(was xai)" do not count as uses.
++code=$(mktemp)
++perl -0777 -pe 's{/\*.*?\*/|//[^\n]*|\x27(?:\\.|[^\x27\\\n])*\x27|"(?:\\.|[^"\\\n])*"}{ }gs' *.c *.h > "$code"
++has() { grep -qw -- "$1" "$code"; }
++todo=$(mktemp)
++trap 'rm -f "$todo" "$code"' EXIT
++bad=0
++while IFS='	' read -r old new; do
++	[ -z "$old" ] && continue
++	if has "$old" && has "$new"; then
++		echo "collision: $new already used while $old still exists" >&2; bad=1
++	elif has "$old"; then
++		printf '%s\t%s\n' "$old" "$new" >> "$todo"
++	elif has "$new"; then
++		echo "already applied: $old -> $new"
++	else
++		echo "not found, skipped: $old"
++	fi
++done < "$tbl"
++[ $bad = 0 ] || exit 1
++while IFS='	' read -r old new; do
++	perl -pi -e "s/\\b(tmp)?\Q$old\E\\b/\$1$new/g" *.c *.h
++done < "$todo"
++echo "renamed $(wc -l < "$todo") names"
++
++# Report vi.h globals that no table maps (e.g. new upstream globals). Informational only.
++scripts/unmapped.sh || true
+diff --git a/scripts/renames-globals.tsv b/scripts/renames-globals.tsv
+new file mode 100644
+index 00000000..9f5fdd5c
+--- /dev/null
++++ b/scripts/renames-globals.tsv
+@@ -0,0 +1,55 @@
++xai	opt_autoindent
++xic	opt_ignorecase
++xhl	opt_syntax_hl
++xhll	opt_hl_line
++xhlw	opt_hl_word
++xhlp	opt_hl_pair
++xhlr	opt_hl_reverse
++xled	opt_line_editor
++xtd	opt_text_dir
++xshape	opt_shaping
++xorder	opt_reorder
++xts	opt_tabstop
++xish	opt_interactive_shell
++xgrp	opt_search_group
++xpac	opt_print_autocomplete
++xmpt	opt_multiline_prompt
++xpr	opt_print_reg
++xlim	opt_render_limit
++xseq	opt_undo_seq
++xerr	opt_error_mode
++xfr	opt_find_reg
++xrr	opt_record_reg
++xvis	opt_startup_flags
++xleft	opt_left_col
++xrow	cursor_row
++xoff	cursor_off
++xtop	view_top_row
++xquit	quit_state
++xbufcur	buf_count
++xgrec	vi_ex_depth
++xexec_dep	ex_exec_depth
++xkmap	cur_keymap
++xkmap_alt	keymap_alt
++xkwddir	search_dir
++xkwdcnt	search_changes
++xkwdrs	search_rset
++xacreg	autocomplete_filter
++xpln	print_newline
++xsep	ex_separator
++xesc	ex_escape
++xregs	str_registers
++xregs_n	str_registers_n
++xdefreg	default_reg
++ex_buf	cur_buf
++ex_pbuf	prev_buf
++xbufsmax	bufs_max
++xbufsalloc	bufs_alloc
++xgdep	global_depth
++xexp	ex_expand_char
++xexe	ex_shell_char
++xcid	capture_status
++xcid_n	capture_n
++xcid_keep	capture_keep
++xqprop	quit_propagate
++xpret	ex_prev_ret
+diff --git a/scripts/renames-keep.txt b/scripts/renames-keep.txt
+new file mode 100644
+index 00000000..16688c72
+--- /dev/null
++++ b/scripts/renames-keep.txt
+@@ -0,0 +1,10 @@
++# vi.h globals deliberately kept under their current name (already descriptive).
++# One name per line; lines starting with # are ignored. Read by scripts/unmapped.sh.
++bufs
++tempbufs
++term_record
++term_resized
++term_sbuf
++term_ufd
++term_winch
++utf8_length
+diff --git a/scripts/renames-term.tsv b/scripts/renames-term.tsv
+new file mode 100644
+index 00000000..e58cc2db
+--- /dev/null
++++ b/scripts/renames-term.tsv
+@@ -0,0 +1,11 @@
++xrows	term_rows
++xcols	term_cols
++tibuf	term_inbuf
++tibuf_pos	term_inbuf_pos
++tibuf_cnt	term_inbuf_count
++tibuf_sz	term_inbuf_size
++tibuf_prev	term_inbuf_prev
++ticmd	term_cmd_keys
++ticmd_pos	term_cmd_keys_pos
++texec	term_exec_type
++texec_n	term_exec_pushed
+diff --git a/scripts/renames-vi-lnum.tsv b/scripts/renames-vi-lnum.tsv
+new file mode 100644
+index 00000000..f2503a38
+--- /dev/null
++++ b/scripts/renames-vi-lnum.tsv
+@@ -0,0 +1,4 @@
++vi_lnnum	lnum_mode
++vi_lncol	lnum_width
++vi_rshift	hint_row_shift
++lnnum	lnum_cur
+diff --git a/scripts/unmapped.sh b/scripts/unmapped.sh
+new file mode 100755
+index 00000000..850d3649
+--- /dev/null
++++ b/scripts/unmapped.sh
+@@ -0,0 +1,19 @@
++#!/bin/sh
++# List globals declared `extern` in vi.h that are neither a new name in any
++# scripts/renames-*.tsv table nor listed in scripts/renames-keep.txt
++# (names deliberately left as they are). After an upstream merge, anything
++# printed here is a global upstream added: give it a table row or keep it.
++# Exit status 1 if anything is unmapped.
++cd "$(dirname "$0")/.."
++perl -ne '
++	next unless /^\s*extern\b/; s/\/\/.*|\/\*.*?\*\///g; s/\[[^\]]*\]//g; s/=[^,;]*//g;
++	s/^\s*extern\s+(const\s+)?(unsigned\s+|signed\s+)?(struct\s+\w+|\w+)\s*//;
++	s/[*;]//g; print "$_\n" for grep /\w/, map { s/^\s+|\s+$//gr } split /,/;
++' vi.h | sort -u > /tmp/unmapped.$$
++{ cut -f2 scripts/renames-*.tsv; grep -v '^#' scripts/renames-keep.txt 2>/dev/null; } | sort -u > /tmp/mapped.$$
++out=$(comm -23 /tmp/unmapped.$$ /tmp/mapped.$$)
++rm -f /tmp/unmapped.$$ /tmp/mapped.$$
++[ -z "$out" ] && { echo "all vi.h globals mapped or kept"; exit 0; }
++echo "vi.h globals with no rename row and not in renames-keep.txt:"
++echo "$out" | sed 's/^/  /'
++exit 1

@@ -1,0 +1,343 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Thu, 1 Oct 2026 01:32:42 +0000
+Subject: [PATCH] docs(led.c): doxygen comments
+
+Hand port of 36e931f1 onto the patched tree, with audit verdicts:
+- led_extcut(): re-adds the tree-sitter extension.
+- led_info is now _led_info(buf, pn) with led_info()/led_infoc() wrappers (tab_complete); comment moved and pn documented.
+- led_redraw(): redraws the tree-sitter preview instead when one is active.
+- led_line(): LED_AGENT flag and its ^o/^l return; :et and :tc key behaviour.
+- led_input(): new source_beg/source_end parameters.
+- 'int' wording in ext_attmerge()/file_index() is now s64.
+Beyond the audit (reread of patched @briefs): led_printparts() notes the :lw wrapping, led_prompt() mentions LED_AGENT, led_done() also frees the path-completion buffer.
+dstrlen() moved to vi.h upstream; its comment goes with vi.h. Comments only; stripped binary identical.
+---
+ led.c | 109 ++++++++++++++++++++++++++++++++++++++++++++++++++++------
+ 1 file changed, 99 insertions(+), 10 deletions(-)
+
+diff --git a/led.c b/led.c
+index 67cfd8b1..f24e9f6e 100644
+--- a/led.c
++++ b/led.c
+@@ -1,8 +1,19 @@
+-static sbuf *suggestsb;
+-static sbuf *acsb;
++/**
++ * @file led.c
++ * @brief Line editor: renders a line to the terminal (bidi, highlighting,
++ * extensions) and reads line input for prompts and insert mode, with
++ * history, registers and word autocomplete.
++ */
++static sbuf *suggestsb;	///< current autocomplete candidates, '\n'-separated; prefix matches first
++static sbuf *acsb;	///< autocomplete word list, '\n'-separated with a leading '\n'; built by ^g
+ static sbuf *compsb;
+-static sbuf *extsb;
++static sbuf *extsb;	///< array of led_ext records; the last extregn bytes are the registered ones
+ 
++/**
++ * @brief Fill suggestsb with acsb words containing pattern, words that start
++ * with it first; words of length l (the typed word itself) are skipped.
++ * @return length of suggestsb
++ */
+ static s64 search(const char *pattern, s64 l)
+ {
+ 	if (!*pattern)
+@@ -11,6 +22,7 @@ static s64 search(const char *pattern, s64 l)
+ 	sbuf_smake(sylsb, 1024)
+ 	char *part = strstr(acsb->s, pattern);
+ 	while (part) {
++		/* part: match position; walk back to the start of its word */
+ 		char *part1 = part;
+ 		while (*part != '\n')
+ 			part--;
+@@ -29,6 +41,11 @@ static s64 search(const char *pattern, s64 l)
+ 	return suggestsb->s_n;
+ }
+ 
++/**
++ * @brief Add the words of buf (autocomplete_filter or a default word regex) to
++ * acsb, skipping duplicates. ibuf holds, as s64, the offset just past each
++ * '\n' in acsb, so a word spans [ip[-1], ip[0]-1).
++ */
+ static void file_index(struct lbuf *buf)
+ {
+ 	char reg[] = "[^\t !-/:-@[-\\]^`{-\x7f]+";
+@@ -76,6 +93,7 @@ static void file_index(struct lbuf *buf)
+ 	rset_free(rs);
+ }
+ 
++/** @brief Map key c through keymap kmap; unmapped keys map to themselves. */
+ static char *kmap_map(s64 kmap, s64 c)
+ {
+ 	static char cs[4];
+@@ -84,7 +102,7 @@ static char *kmap_map(s64 kmap, s64 c)
+ 	return keymap[c] ? keymap[c] : cs;
+ }
+ 
+-/* map cursor horizontal position to terminal column number */
++/** @brief Map cursor screen position to terminal column (mirrored for RTL lines). */
+ s64 led_pos(char *s, s64 pos)
+ {
+ 	if (dir_context(s) < 0)
+@@ -92,7 +110,7 @@ s64 led_pos(char *s, s64 pos)
+ 	return pos - opt_left_col;
+ }
+ 
+-/* map a character offset in x->s0 to its x->att index; -1 if not visible */
++/** @brief Map a character offset in x->s0 to its x->att index; -1 if not visible. */
+ s64 led_attidx(led_ctx *x, s64 off)
+ {
+ 	s64 i, l, j;
+@@ -115,6 +133,7 @@ s64 led_attidx(led_ctx *x, s64 off)
+ 	return -1;
+ }
+ 
++/** @brief Default extension: usr holds {offset, length, attribute} s64 triplets merged into att. */
+ static void ext_attmerge(led_ext *p, led_ctx *x)
+ {
+ 	if (!led_extkey(p, x))
+@@ -130,8 +149,12 @@ static void ext_attmerge(led_ext *p, led_ctx *x)
+ 	}
+ }
+ 
+-static s64 extregn;	/* registered extension tracker */
++static s64 extregn;	///< bytes of registered (persistent) extensions at the end of extsb
+ 
++/**
++ * @brief Append a zeroed extension (ext_func = ext_attmerge).
++ * The returned pointer is into extsb and is invalidated by the next push.
++ */
+ static led_ext *led_extpush(void)
+ {
+ 	led_ext la;
+@@ -143,10 +166,12 @@ static led_ext *led_extpush(void)
+ 	return (led_ext*)&extsb->s[extsb->s_n - sizeof(la)];
+ }
+ 
++/** @brief New temporary extension (dropped by led_extcut()); kept before the registered ones. */
+ led_ext *led_extnew(void)
+ {
+ 	led_ext la, *p = led_extpush();
+ 	if (extregn) {	/* registered extensions stay last */
++		/* reg: first registered record; move them up and put the new record in front */
+ 		char *reg = (char*)p - extregn;
+ 		la = *p;
+ 		memmove(reg + sizeof(la), reg, extregn);
+@@ -156,12 +181,14 @@ led_ext *led_extnew(void)
+ 	return p;
+ }
+ 
++/** @brief New registered extension; survives led_extcut(). */
+ led_ext *led_extreg(void)
+ {
+ 	extregn += sizeof(led_ext);
+ 	return led_extpush();
+ }
+ 
++/** @brief First extension with the given function, or NULL. */
+ led_ext *led_extfind(void (*ext_func)(led_ext *p, led_ctx *x))
+ {
+ 	if (!extsb)
+@@ -174,6 +201,7 @@ led_ext *led_extfind(void (*ext_func)(led_ext *p, led_ctx *x))
+ 	return NULL;
+ }
+ 
++/** @brief Remove extension p from extsb. */
+ void led_extdel(led_ext *p)
+ {
+ 	char *nxt = (char*)p + sizeof(*p);
+@@ -183,7 +211,7 @@ void led_extdel(led_ext *p)
+ 	sbuf_cut(extsb, extsb->s_n - sizeof(*p))
+ }
+ 
+-/* drop unregistered extensions only */
++/** @brief Drop unregistered extensions only, then re-add the tree-sitter extension (ts_init()). */
+ void led_extcut(void)
+ {
+ 	if (!extsb)
+@@ -193,6 +221,8 @@ void led_extcut(void)
+ 	ts_init();
+ }
+ 
++/* print_ch/hid_ch: emit a printable / non-printable char; variant 2 is used
++ * when vi_hidch shows hidden chars ('_' space, '\\' newline, "->" tab) */
+ #define print_ch1(out) sbuf_mem(out, chrs[o], l)
+ #define print_ch2(out) sbuf_mem(out, *chrs[o] == ' ' ? "_" : chrs[o], l)
+ 
+@@ -204,6 +234,8 @@ if (ctx > 0 && *chrs[o] == '\t') \
+ else if (*chrs[o] == '\t') \
+ 	out->s[out->s_n - (i - l)] = '<'; \
+ 
++/* Emit screen cells [0, cterm): off[i] is the char in cell i (-1 = none),
++ * [l, i) the cells it covers; attributes change only when they differ. */
+ #define led_out(out, n) \
+ { \
+ for (i = 0; i < cterm;) { \
+@@ -235,7 +267,9 @@ for (i = 0; i < cterm;) { \
+ 	att_old = att_new; \
+ } } \
+ 
+-/* render and highlight a line */
++/**
++ * @brief Render and highlight line s0, screen columns [cbeg, cend), into term_sbuf.
++ */
+ void led_render(char *s0, s64 cbeg, s64 cend)
+ {
+ 	if (!opt_line_editor)
+@@ -259,6 +293,11 @@ void led_render(char *s0, s64 cbeg, s64 cend)
+ 		for (c = cbeg; c < cend; c++)
+ 			off[c - cbeg] = c <= r->cmax ? r->col[c] : -1;
+ 	}
++	/* line does not fit: drop wide chars cut at either edge, then build bound,
++	 * the visible chars in logical order, so highlighting sees only them.
++	 * att[] temporarily holds the visible char offsets in screen order and is
++	 * insertion-sorted; afterwards stt[k] is the offset of bound char k and
++	 * ctt[j] the bound index of the j-th visible char in screen order. */
+ 	if (r->cmax > cterm || cbeg || n > cterm) {
+ 		i = ctx < 0 ? cterm-1 : 0;
+ 		o = off[i];
+@@ -324,12 +363,14 @@ void led_render(char *s0, s64 cbeg, s64 cend)
+ 	else
+ 		led_out(term_sbuf, 1)
+ 	sbufn_mem(term_sbuf, "\x1b[m", 3)
++	/* restore the bytes ren_position() cut off for opt_render_limit */
+ 	if (r->holelen) {
+ 		memcpy(chrs[n], r->nulhole, r->holelen);
+ 		r->holelen = 0;
+ 	}
+ }
+ 
++/** @brief Byte offset of the last character of s. */
+ static s64 led_lastchar(char *s)
+ {
+ 	char *r = *s ? strchr(s, '\0') : s;
+@@ -346,6 +387,7 @@ static s64 led_lw;		/* the edited line is drawn wrapped at absolute rows */
+ static s64 led_rowh = 1;	/* the rows the edited line occupies */
+ static s64 led_nextb;		/* the buffer line drawn below the edited line */
+ 
++/** @brief Byte offset of the start of the last word of s (trailing blanks skipped). */
+ static s64 led_lastword(char *s)
+ {
+ 	char *r = *s ? uc_beg(s, strchr(s, '\0') - 1) : s;
+@@ -445,6 +487,12 @@ static s64 led_complist(sbuf *lst, s64 beg)
+ 	return beg < tot ? beg : 0;
+ }
+ 
++/**
++ * @brief Draw the input line sb->s + ps followed by post and place the cursor
++ * between them. With :lw (led_lw) the line wraps over led_rowh rows at
++ * led_row and the buffer lines below it are redrawn.
++ * @param[out] poff  cursor character offset (number of chars before post)
++ */
+ static void led_printparts(sbuf *sb, s64 pre, s64 ps,
+ 	char *post, s64 postn, s64 *poff)
+ {
+@@ -466,6 +514,8 @@ static void led_printparts(sbuf *sb, s64 pre, s64 ps,
+ 	rstate += 2;
+ 	rstate->s = NULL;
+ 	ren_state *r = ren_position(sb->s + ps);
++	/* off: cursor char index; pos: its screen column, next to the char before
++	 * it on the side the text flows (checked via the two preceding chars) */
+ 	off = r->n - postn;
+ 	*poff = off;
+ 	pos = ren_cursor(r->s, r->pos[MAX(0, off-1)]);
+@@ -526,7 +576,11 @@ static void led_printparts(sbuf *sb, s64 pre, s64 ps,
+ 	rstate -= 2;
+ }
+ 
+-/* read a character from the terminal */
++/**
++ * @brief Read a character starting with key c: handles ^f/^e keymap switch,
++ * ^v literal, ^k digraph and utf-8 sequences.
++ * @return static buffer with the (mapped) character, NULL on interrupt
++ */
+ char *led_read(s64 *kmap, s64 c)
+ {
+ 	static char buf[5];
+@@ -567,6 +621,9 @@ char *led_read(s64 *kmap, s64 c)
+ 	return NULL;
+ }
+ 
++/* show buf highlighted after the input until the next key; pn is the number
++ * of chars after the cursor (led_info() passes postn, led_infoc() also
++ * counts buf, leaving the cursor in front of it) */
+ #define _led_info(buf, pn) \
+ { \
+ 	s64 ola[3]; \
+@@ -603,6 +660,11 @@ static void led_redrawlw(s64 ctop, s64 crow)
+ /* like led_info(), except the cursor is left where it was, in front of buf */
+ #define led_infoc(buf) _led_info(buf, postn + uc_slen(buf))
+ 
++/**
++ * @brief Redraw screen rows from r down: rows for orow..crow come from the
++ * lines typed so far (cs), the rest from the buffer. While a tree-sitter
++ * preview is active the preview is redrawn instead (led_preview_draw()).
++ */
+ static void led_redraw(char *cs, s64 r, s64 orow, s64 crow, s64 ctop, s64 flg)
+ {
+ 	if (ts_preview) {
+@@ -635,6 +697,7 @@ static void led_redraw(char *cs, s64 r, s64 orow, s64 crow, s64 ctop, s64 flg)
+ 	rstate--;
+ }
+ 
++/** @brief Switch between vi and ex (Q, ^o) in a nested loop, then restore state. */
+ void led_modeswap(void)
+ {
+ 	preserve(struct ts_state*, ts_preview, ts_preview = NULL;)
+@@ -658,7 +721,19 @@ void led_modeswap(void)
+ 	restore(ts_preview)
+ }
+ 
+-/* read a line from the terminal */
++/**
++ * @brief Key loop for one line of input.
++ * @param sb      input; sb->s[0..pre) cannot be erased, ps is where this line starts
++ * @param post    text after the cursor (postn chars); *postref owns a copy if made
++ * @param ai_max  autoindent limit; < 0 for prompts
++ * @param poff    receives the cursor character offset
++ * @param flg     bit 2: return after one key; LED_AGENT: ^o and ^l are
++ *                returned to the caller (the agent conversation prompt)
++ * @return the key that ended input ('\n', an interrupt, an unhandled edit
++ *         key, or ^o/^l with LED_AGENT)
++ * With :et, ^t/^d/tab insert or remove xsw spaces instead of a tab; with :tc,
++ * tab (or ^_) completes paths in ':' prompts.
++ */
+ static s64 led_line(sbuf *sb, s64 pre, s64 ps, char **post, s64 postn, char **postref,
+ 	s64 ai_max, s64 *poff, s64 *kmap, ins_state *is, s64 orow, s64 crow, s64 ctop, s64 flg)
+ {
+@@ -957,6 +1032,11 @@ static s64 led_line(sbuf *sb, s64 pre, s64 ps, char **post, s64 postn, char **po
+ 	return c;
+ }
+ 
++/**
++ * @brief Read a prompt line into sb after its current contents.
++ * @param flg  bit 1: save to history (tempbufs[0]); bit 2 and LED_AGENT: see led_line()
++ * @return the key that ended input
++ */
+ s64 led_prompt(sbuf *sb, char *insert, s64 *kmap, ins_state *is, s64 ps, s64 flg)
+ {
+ 	s64 n, key, off;
+@@ -991,6 +1071,14 @@ s64 led_prompt(sbuf *sb, char *insert, s64 *kmap, ins_state *is, s64 ps, s64 flg
+ 	return key;
+ }
+ 
++/**
++ * @brief Insert-mode input, possibly over several lines, with autoindent.
++ * @param post  text after the insertion point (postn chars)
++ * @param[out] pren  byte length of sb before post
++ * @param source_beg,source_end  buffer rows [beg, end) being edited, shown
++ *                    by the tree-sitter preview (ts_preview_begin())
++ * @return the key that ended input
++ */
+ s64 led_input(sbuf *sb, char *post, s64 postn, s64 row, s64 flg, s64 *pren,
+ 	s64 source_beg, s64 source_end)
+ {
+@@ -1050,6 +1138,7 @@ s64 led_input(sbuf *sb, char *post, s64 postn, s64 row, s64 flg, s64 *pren,
+ 	}
+ }
+ 
++/** @brief Free the autocomplete and path-completion buffers. */
+ void led_done(void)
+ {
+ 	if (suggestsb) {

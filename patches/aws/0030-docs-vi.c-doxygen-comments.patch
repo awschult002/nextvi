@@ -1,0 +1,555 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Thu, 1 Oct 2026 01:39:18 +0000
+Subject: [PATCH] docs(vi.c): doxygen comments
+
+Ported from refactor/readable-names per comment-audit.md. emalloc/erealloc/itoa docs live in vi.h. Updated @file, lnum_width, vi_mod, vi_word_m, vi_col, vi_drawrow (new signature), the line-number i/i1 note, vi_region @return, vi_shift, vi_scrollforward/backward for the patches.
+---
+ vi.c | 175 ++++++++++++++++++++++++++++++++++++++++++++++++-----------
+ 1 file changed, 144 insertions(+), 31 deletions(-)
+
+diff --git a/vi.c b/vi.c
+index ec7640fe..cc1fbb21 100644
+--- a/vi.c
++++ b/vi.c
+@@ -1,3 +1,13 @@
++/**
++ * @file vi.c
++ * @brief Visual mode: main(), the normal-mode command loop vi(), screen
++ * drawing, motions and operators.
++ *
++ * The editor is built as one translation unit: this file includes cJSON.c,
++ * then vi.h, then every other .c file (including agent.c, treesitter.c and
++ * lsp.c), so their statics are visible here. Screen frames are painted on a
++ * separate paint thread (vi_rendloop()), fed by vi_rendpost().
++ */
+ #include <ctype.h>
+ #include <fcntl.h>
+ #include <stdio.h>
+@@ -50,9 +60,9 @@ static struct vi_rend {
+ static void vi_rendpost(s64 mod, s64 otop, s64 otopsub, s64 oleft,
+ 			s64 orow, s64 ooff, s64 pos);
+ 
+-s64 vi_hidch;			/* show hidden chars */
+-s64 lnum_width;			/* line numbers cursor offset */
+-static s64 lnum_mode;		/* line numbers */
++s64 vi_hidch;	///< show hidden chars (V toggles)
++s64 lnum_width;	///< width of the line-number column, added to the cursor column; with :lw it also narrows the wrap width (was vi_lncol)
++static s64 lnum_mode;	///< line-number mode set by [count]#: a bitmask of LN_* flags; LN_ONCE alone means "for one command" (was vi_lnnum)
+ /** Line-number mode flags for lnum_mode; `[count]#` toggles the flag equal to count, bare `#` = LN_ONCE. */
+ enum {
+ 	LN_ONCE = 1,	///< bare `#`: absolute + relative-at-indent, cleared on the next keypress
+@@ -60,28 +70,31 @@ enum {
+ 	LN_INDENT = 4,	///< `4#`: relative number moved to just before the first non-blank character
+ 	LN_REL = 8,	///< `8#`: relative numbers in the left column
+ };
+-/* screen redraw - bit 1: whole screen, bit 2: current line, bit 3: update vi_col */
++/** screen redraw - bit 1: whole screen, bit 2: current line, bit 3: update vi_col; any nonzero value recomputes vi_col.
++ * Set by the input loop for each command and handed to the paint thread by vi_rendpost(); vi_rendloop() works on its own copy. */
+ static s64 vi_mod;
+-static char vi_word_m[] = "\0leEwW";	/* line word navigation */
+-static char *vi_word = vi_word_m;
+-static char *_vi_word = vi_word_m;
+-static s64 vi_wsel = 1;
+-static s64 hint_row_shift;			/* row shift for vi_word */
+-static s64 vi_arg;			/* numeric argument */
+-static char vi_charlast[5];		/* the last character searched via f, t, F, or T */
+-static s64 vi_charcmd;			/* the character finding command */
+-static s64 vi_ybuf;			/* current yank buffer, -1 if not given */
+-static s64 vi_col;			/* the column requested by | command */
+-static s64 vi_scrollud;			/* scroll amount for ^u and ^d */
+-static s64 vi_scrolley;			/* scroll amount for ^e and ^y */
+-static s64 vi_cndir = 1;		/* ^n direction */
+-static s64 vi_status;			/* permanent status bar */
+-static s64 vi_tsm;			/* type of the status message */
+-static s64 vi_nlmode;			/* new line mode for vi regions */
+-static s64 vi_visual;			/* visual mode: 0=off, 'v'=char, 'V'=line 'b'=block */
+-static s64 vi_vrow;			/* selection anchor row */
+-static s64 vi_voff;			/* selection anchor column */
+-
++static char vi_word_m[] = "\0leEwW";	///< motion hint modes drawn under the cursor line (^v); "\0" = off; not drawn with :lw
++static char *vi_word = vi_word_m;	///< current hint mode, points into vi_word_m
++static char *_vi_word = vi_word_m;	///< base of vi_word_m
++static s64 vi_wsel = 1;	///< last selected hint mode index (1..5)
++static s64 hint_row_shift;	///< rows below the cursor are shifted down by 1 while the hint row is shown (was vi_rshift)
++static s64 vi_arg;	///< numeric count prefix, 0 if none
++static char vi_charlast[5];	///< the last character searched via f, t, F, or T
++static s64 vi_charcmd;	///< the character finding command (f, t, F or T)
++static s64 vi_ybuf;	///< register from a "x prefix, -1 if not given
++static s64 vi_col;	///< desired screen column: set by | and kept across j/k; with :lw a column in the unwrapped line, and j/k step one segment (vi_wrapstep())
++static s64 vi_scrollud;	///< scroll amount for ^u and ^d, 0 = half screen
++static s64 vi_scrolley;	///< scroll amount for ^e and ^y
++static s64 vi_cndir = 1;	///< ^n buffer cycling direction
++static s64 vi_status;	///< permanent status bar shown (takes one row from term_rows)
++static s64 vi_tsm;	///< type of the status message: 0 file info, 1 character info
++static s64 vi_nlmode;	///< 1: w/b/e and space motions do not cross line ends (toggled by vw)
++
++static s64 vi_visual;	///< visual mode: 0=off, 'v'=char, 'V'=line 'b'=block
++static s64 vi_vrow;	///< selection anchor row
++static s64 vi_voff;	///< selection anchor column
++
++/** @brief Draw msg on the bottom (status) row. */
+ static void vi_drawmsg(char *msg)
+ {
+ 	syn_blockhl = -1;
+@@ -96,6 +109,7 @@ static void vi_drawmsg(char *msg)
+ 
+ void lsp_show_msg(char *msg) { vi_drawmsg_mpt(msg) }
+ 
++/** @brief Move *off to the character one screen column away in dir; -1 at the line end. */
+ static s64 vi_nextcol(char *ln, s64 dir, s64 *off)
+ {
+ 	s64 o = ren_off(ln, ren_next(ln, ren_pos(ln, *off), dir));
+@@ -294,6 +308,8 @@ static void vi_wrapstep(s64 *row, s64 cnt, s64 dir)
+ 	}
+ }
+ 
++/* Draw digit hints into tmp[] at the screen column of each successive
++ * position reached by the motion func (starting from the cursor). */
+ #define vi_drawnum(func) \
+ { \
+ nrow = cursor_row; \
+@@ -502,6 +518,12 @@ static s64 vi_rendrow(char *s, s64 trow, s64 lncol, s64 source_row)
+ 	return h;
+ }
+ 
++/**
++ * @brief Draw buffer row at terminal row trow, with the motion hint row or
++ * line numbers if enabled, visual-mode attributes, :hllw wrap markers and
++ * LSP diagnostics. The hint row is not drawn with :lw.
++ * @return the number of terminal rows used
++ */
+ static s64 vi_drawrow(s64 row, s64 trow)
+ {
+ 	const char *diag = NULL;
+@@ -572,6 +594,11 @@ static s64 vi_drawrow(s64 row, s64 trow)
+ 		s = row ? ch : ch+1;
+ 	else if (lnum_cur && opt_line_editor) {
+ 		char tmp[32], tmp1[32], *p;
++		/* Line numbers: tmp = "<abs> <rel> " (left column text), p = start of the
++		 * relative part in tmp, i/i1 = digit widths of the widest visible
++		 * absolute/relative number, l1 = total column width. With LN_ONCE or
++		 * LN_INDENT i1 is then reused as the screen column just before the
++		 * indent; i is reused for the rows vi_rendrow() returns. */
+ 		c = tmp, i = 0, i1 = 0;
+ 		if (lnum_cur == LN_ONCE || lnum_cur & LN_ABS) {
+ 			c = itoa(row+1-hint_row_shift, tmp);
+@@ -585,6 +612,8 @@ static s64 vi_drawrow(s64 row, s64 trow)
+ 			i1 = itoalen(term_rows);
+ 		}
+ 		*c = '\0';
++		/* l1: column width, padding the numbers to the digits of the widest
++		 * visible absolute (i) and relative (i1) numbers */
+ 		l1 = (c - tmp) + (i+i1 - (strlen(tmp) - !!i - !!i1));
+ 		lnum_width = dir_context(s) < 0 ? 0 : l1;
+ 		memset(c, ' ', l1 - (c - tmp));
+@@ -633,7 +662,7 @@ s64 vi_drawline(s64 row, s64 trow)
+ 	return vi_drawrow(row, trow);
+ }
+ 
+-/* redraw the screen */
++/** @brief Redraw screen rows from buffer row i to the bottom. */
+ static void vi_drawagain(s64 i)
+ {
+ 	s64 trow;
+@@ -683,7 +712,7 @@ static void vi_drawscroll(s64 n)
+ 	vi_rowend = 0;
+ }
+ 
+-/* update the screen */
++/** @brief Scroll the screen by i rows (term_room) and draw only the uncovered rows. */
+ static void vi_drawupdate(s64 i)
+ {
+ 	s64 n;
+@@ -706,6 +735,16 @@ static void vi_drawupdate(s64 i)
+ 	}
+ }
+ 
++/**
++ * @brief Prompt on the bottom row.
++ * @param msg     prompt text shown before the input
++ * @param ft      filetype used to highlight the prompt line
++ * @param insert  initial text after msg, may be NULL
++ * @param[out] ret   1 if accepted with Enter
++ * @param[in,out] kmap  keymap index
++ * @param[out] mlen  length of msg; the input starts at the returned string + mlen
++ * @return malloc'd msg + input
++ */
+ static char *vi_prompt(char *msg, char *ft, char *insert, s64 *ret, s64 *kmap, s64 *mlen)
+ {
+ 	sbuf_smake(sb, term_cols)
+@@ -718,12 +757,14 @@ static char *vi_prompt(char *msg, char *ft, char *insert, s64 *ret, s64 *kmap, s
+ 	return sb->s;
+ }
+ 
++/** @brief vi_prompt() with the ex filetype and the English keymap. */
+ static char *vi_enprompt(char *msg, char *insert, s64 *ret, s64 *mlen)
+ {
+ 	s64 kmap = 0;
+ 	return vi_prompt(msg, ex_ft, insert, ret, &kmap, mlen);
+ }
+ 
++/** @brief Read an optional "x register prefix; -1 (key pushed back) if absent. */
+ static s64 vi_yankbuf(s64 winch)
+ {
+ 	s64 c = term_read(winch);
+@@ -733,6 +774,7 @@ static s64 vi_yankbuf(s64 winch)
+ 	return -1;
+ }
+ 
++/** @brief Read a numeric count; 0 if none. The key after it is consumed too; callers push it back with term_dec(). */
+ static s64 vi_prefix(void)
+ {
+ 	s64 n = 0;
+@@ -746,6 +788,7 @@ static s64 vi_prefix(void)
+ 	return n;
+ }
+ 
++/** @brief Read one digit key; -1 if not a digit. */
+ static s64 vi_digit(void)
+ {
+ 	s64 c = term_read(0);
+@@ -754,12 +797,14 @@ static s64 vi_digit(void)
+ 	return -1;
+ }
+ 
++/** @brief Character offset to screen column in row. */
+ static s64 vi_off2col(struct lbuf *lb, s64 row, s64 off)
+ {
+ 	char *ln = lbuf_get(lb, row);
+ 	return ln ? ren_pos(ln, off) : 0;
+ }
+ 
++/** @brief Screen column to character offset in row (clamped to the line). */
+ static s64 vi_col2off(struct lbuf *lb, s64 row, s64 col)
+ {
+ 	char *ln = lbuf_get(lb, row);
+@@ -890,6 +935,14 @@ static char *vi_isearch(s64 cmd, s64 *ret, s64 *mlen, s64 *frow, s64 *foff)
+ 	return sb->s;
+ }
+ 
++/**
++ * @brief `/ ? n N` search cnt times from (*row, *off).
++ * @param cmd  '/' or '?' (prompt for a pattern), 'n' or 'N'
++ * @param cnt  repeat count
++ * @param[in,out] row,off  start position; set to the match
++ * @param msg  show messages; 0 is used for silent searches (file search)
++ * @return 0 if found
++ */
+ static s64 vi_search(s64 cmd, s64 cnt, s64 *row, s64 *off, s64 msg)
+ {
+ 	s64 i, dir, ret = 0;
+@@ -926,6 +979,10 @@ static s64 vi_search(s64 cmd, s64 cnt, s64 *row, s64 *off, s64 msg)
+ 	return 0;
+ }
+ 
++/**
++ * @brief Regex for the word(s) at (row, off): `\<word\>` for n <= 1,
++ * else n words escaped with ex_regesc(). malloc'd, NULL if none.
++ */
+ static char *vi_curword(struct lbuf *lb, s64 row, s64 off, s64 n, s64 ex)
+ {
+ 	char *ln = lbuf_get(lb, row);
+@@ -935,6 +992,7 @@ static char *vi_curword(struct lbuf *lb, s64 row, s64 off, s64 n, s64 ex)
+ 	char **chrs = rstate->chrs;
+ 	s64 cap = rstate->n;
+ 	s64 end = off;
++	/* [off, end): character range of the word; chrs[] gives its bytes */
+ 	for (s64 i = 0; i < n && end < cap; i++)
+ 		while (uc_kind(chrs[end++]) == 1);
+ 	for (; off > 0 && uc_kind(chrs[off - 1]) == 1; off--);
+@@ -950,6 +1008,10 @@ static char *vi_curword(struct lbuf *lb, s64 row, s64 off, s64 n, s64 ex)
+ 	sbufn_ret(sb, sb->s)
+ }
+ 
++/**
++ * @brief Store s in register c like vi: linewise text shifts registers
++ * 1..9, otherwise the old content moves to '0'; uppercase c appends.
++ */
+ static void vi_regput(s64 c, const char *s, s64 lnmode)
+ {
+ 	sbuf *i_s;
+@@ -963,10 +1025,15 @@ static void vi_regput(s64 c, const char *s, s64 lnmode)
+ 	ex_regput(tolower(c), s, uc_isupper(c));
+ }
+ 
+-rstr *fsincl;
+-static s64 fspos;
+-static s64 fsdir;
++rstr *fsincl;	///< regex filter for files listed by dir_calc(), NULL = all
++static s64 fspos;	///< next index in the file list (tempbufs[1]) for ^] / ^p search
++static s64 fsdir;	///< direction of the last file search: 1, -1, or 0
+ 
++/**
++ * @brief Append all regular files under path (recursive) to tempbufs[1].
++ * Subdirectories are walked with explicit stacks: dps[] open dirs,
++ * ptrs[] their path buffers, plen[] their path lengths.
++ */
+ void dir_calc(char *path)
+ {
+ 	struct dirent *dirp;
+@@ -1022,6 +1089,7 @@ void dir_calc(char *path)
+ 	free(sb->s);
+ }
+ 
++/* Open path from the file list and search it; returns 1 from the caller on a hit. */
+ #define fssearch() \
+ len = lbuf_s(path)->len; \
+ path[len] = '\0'; \
+@@ -1038,6 +1106,7 @@ if (ret && cursor_row) { \
+ if (!vi_search(*row ? 'N' : 'n', cnt, row, off, 0)) \
+ 	return 1; \
+ 
++/** @brief Search the keyword forward through the files in tempbufs[1], wrapping once. */
+ static s64 fs_search(s64 cnt, s64 *row, s64 *off)
+ {
+ 	char *path;
+@@ -1055,6 +1124,7 @@ static s64 fs_search(s64 cnt, s64 *row, s64 *off)
+ 	return 0;
+ }
+ 
++/** @brief Search the keyword backward through the files in tempbufs[1]. */
+ static s64 fs_searchback(s64 cnt, s64 *row, s64 *off)
+ {
+ 	char *path;
+@@ -1066,11 +1136,13 @@ static s64 fs_searchback(s64 cnt, s64 *row, s64 *off)
+ 	return 0;
+ }
+ 
+-static char rep_cmd[sizeof(term_cmd_keys)];	/* the last command */
+-static s64 rep_len;
++static char rep_cmd[sizeof(term_cmd_keys)];	///< keys of the last change, replayed by .
++static s64 rep_len;	///< length of rep_cmd
++/* save the keys of the current command (term_cmd_keys) for . */
+ #define rep_record() memcpy(rep_cmd, term_cmd_keys, term_cmd_keys_pos); rep_len = term_cmd_keys_pos;
+ static __thread s64 redraw_thread;	/* paint thread: never measure on slot 0 */
+ 
++/** @brief Show file info (type 0) or info on the character under the cursor (type 1). */
+ static void vc_status(s64 type)
+ {
+ 	s64 l, col;
+@@ -1103,6 +1175,15 @@ static void vc_status(s64 type)
+ 	vi_drawmsg_mpt(vi_msg)
+ }
+ 
++/**
++ * @brief Read a motion key and move (*row, *off).
++ * @param cmd  the operator key (e.g. 'd'), or -1 for plain cursor movement;
++ *             repeating the operator (dd) selects whole lines
++ * @param[in,out] row,off  position, moved by the motion
++ * @return the motion key, 0 if the key is not a motion, -1 if it failed;
++ *         *off = -1 on return means a linewise motion; cw/cW within one
++ *         line return 'e'/'E'
++ */
+ static s64 vi_region(s64 cmd, s64 *row, s64 *off)
+ {
+ 	static sbuf *savepath[5];
+@@ -1419,6 +1500,7 @@ static s64 vi_region(s64 cmd, s64 *row, s64 *off)
+ 	return mv;
+ }
+ 
++/** @brief Yank the region into vi_ybuf (or default_reg). */
+ static void vi_yank(s64 r1, s64 o1, s64 r2, s64 o2, s64 lnmode)
+ {
+ 	sbuf rsb;
+@@ -1429,6 +1511,7 @@ static void vi_yank(s64 r1, s64 o1, s64 r2, s64 o2, s64 lnmode)
+ 	cursor_off = lnmode ? cursor_off : o1;
+ }
+ 
++/** @brief Yank and delete the region; lnmode deletes rows r1..r2. */
+ static void vi_delete(s64 r1, s64 o1, s64 r2, s64 o2, s64 lnmode)
+ {
+ 	sbuf rsb;
+@@ -1448,6 +1531,7 @@ static void vi_delete(s64 r1, s64 o1, s64 r2, s64 o2, s64 lnmode)
+ 	cursor_off = lnmode ? lbuf_indents(xb, cursor_row) : o1;
+ }
+ 
++/** @brief Byte length of the leading blanks of ln (0 if autoindent is off). */
+ static s64 vi_indents(char *ln)
+ {
+ 	if (opt_autoindent <= 0 || !ln)
+@@ -1457,6 +1541,7 @@ static s64 vi_indents(char *ln)
+ 	return ln - pln;
+ }
+ 
++/** @brief Replace the region with typed text; returns the key that ended input. */
+ static s64 vi_change(s64 r1, s64 o1, s64 r2, s64 o2, s64 lnmode)
+ {
+ 	char *post, *ln = lbuf_get(xb, r1);
+@@ -1490,12 +1575,14 @@ static s64 vi_change(s64 r1, s64 o1, s64 r2, s64 o2, s64 lnmode)
+ 	led_row = xlw ? MAX(0, vi_srow(r1)) : -1;
+ 	sbuf_mem(sb, ln, l1)
+ 	key = led_input(sb, post, postn, r1 - (r1 - r2), 0, &postn, r1, r2 + 1);
++	/* edit only if the resulting line differs from the original */
+ 	if (postn + l2 != tlen || memcmp(ln + l1, sb->s + l1, tlen - l2 - l1))
+ 		lbuf_edit(xb, sb->s, r1, r2 + 1, o1, cursor_off);
+ 	free(sb->s);
+ 	return key;
+ }
+ 
++/** @brief Change ASCII case in the region: u lower, U upper, ~ toggle. */
+ static void vi_case(s64 r1, s64 o1, s64 r2, s64 o2, s64 lnmode, s64 cmd)
+ {
+ 	sbuf rsb;
+@@ -1526,6 +1613,7 @@ static void vi_case(s64 r1, s64 o1, s64 r2, s64 o2, s64 lnmode, s64 cmd)
+ 	cursor_off = lnmode ? lbuf_indents(xb, r2) : o2;
+ }
+ 
++/** @brief Prompt with ":r1,r2!" to filter the rows through a command. */
+ static void vi_pipe(s64 r1, s64 r2)
+ {
+ 	s64 mlen, ret;
+@@ -1549,6 +1637,10 @@ static void vi_pipe(s64 r1, s64 r2)
+ 	free(cmd);
+ }
+ 
++/**
++ * @brief Indent (dir > 0, adds tabs) or unindent (removes up to count blanks) rows r1..r2.
++ * With :et, each step adds xsw spaces, or removes up to xsw leading spaces.
++ */
+ static void vi_shift(s64 r1, s64 r2, s64 dir, s64 count)
+ {
+ 	sbuf_smake(sb, 1024)
+@@ -1761,6 +1853,7 @@ static s64 vc_visual_op(s64 cmd)
+ 	return key;
+ }
+ 
++/** @brief Operator command (d c y ! > < ~ u U ^w) followed by a motion. */
+ static s64 vc_motion(s64 cmd)
+ {
+ 	s64 r1 = cursor_row, r2 = cursor_row;	/* region rows */
+@@ -1786,6 +1879,7 @@ static s64 vc_motion(s64 cmd)
+ 		swap(&o1, &o2);
+ 	} else if (r1 == r2 && o1 > o2)
+ 		swap(&o1, &o2);
++	/* r briefly holds the line pointer; clamp o1 to the line's length */
+ 	ren_state *r = (ren_state*)lbuf_get(xb, r1);
+ 	r = r ? ren_position((char*)r) : NULL;
+ 	o1 = r ? MAX(0, MIN(o1, r->n)) : 0;
+@@ -1815,6 +1909,7 @@ static s64 vc_motion(s64 cmd)
+ 	return 0;
+ }
+ 
++/** @brief Insert commands i I a A o O; returns the key that ended input. */
+ static s64 vc_insert(s64 cmd)
+ {
+ 	char *post, *ln = lbuf_get(xb, cursor_row);
+@@ -1848,6 +1943,7 @@ static s64 vc_insert(s64 cmd)
+ 		post = "\n";
+ 	} else {
+ 		off = cursor_off;
++		/* l1: byte offset of the cursor char; post: text after it, postn chars long */
+ 		l1 = rstate->chrs[off] - ln;
+ 		postn = rstate->n - off;
+ 		post = ln + l1;
+@@ -1867,6 +1963,7 @@ static s64 vc_insert(s64 cmd)
+ 	return key;
+ }
+ 
++/** @brief p / P: put a register after / before the cursor (linewise if it has a newline). */
+ static s64 vc_put(s64 cmd)
+ {
+ 	s64 cnt = MAX(1, vi_arg);
+@@ -1894,6 +1991,7 @@ static s64 vc_put(s64 cmd)
+ 	if (!(ln = lbuf_get(xb, cursor_row)))
+ 		ln = "\n";
+ 	off = ren_noeol(ln, cursor_off) + (ln[0] != '\n' && cmd == 'p');
++	/* new line = bytes before char off + register x cnt + rest of the line */
+ 	sbuf_mem(sb, ln, rstate->chrs[off] - ln)
+ 	for (i = 0; i < cnt; i++)
+ 		sbuf_mem(sb, buf->s, buf->s_n)
+@@ -1904,6 +2002,7 @@ static s64 vc_put(s64 cmd)
+ 	return 1;
+ }
+ 
++/** @brief Join cnt lines from the cursor row; spc inserts spaces. */
+ static void vc_join(s64 spc, s64 cnt)
+ {
+ 	s64 o2 = 0;
+@@ -1912,18 +2011,21 @@ static void vc_join(s64 spc, s64 cnt)
+ 	cursor_off = o2;
+ }
+ 
++/** @brief Scroll down cnt rows (terminal rows, i.e. wrap segments, with :lw), keeping the cursor on screen. */
+ static void vi_scrollforward(s64 cnt)
+ {
+ 	vi_topadv(cnt);
+ 	cursor_row = MAX(cursor_row, vi_fullrow());
+ }
+ 
++/** @brief Scroll up cnt rows (terminal rows, i.e. wrap segments, with :lw), keeping the cursor on screen. */
+ static void vi_scrollbackward(s64 cnt)
+ {
+ 	vi_topadv(-cnt);
+ 	cursor_row = MIN(cursor_row, vi_lastrow());
+ }
+ 
++/** @brief r: replace the next count characters with the typed character. */
+ static s64 vc_replace(void)
+ {
+ 	s64 cnt = MAX(1, vi_arg);
+@@ -2010,6 +2112,7 @@ static void vi_spellmsg(void)
+ 	free(sb->s);
+ }
+ 
++/** @brief \@x / &x: run register x as keys (: register as ex commands); repeated key reuses the last one. */
+ static void vc_execute(s64 cmd)
+ {
+ 	static s64 exec_buf = -1;
+@@ -2035,6 +2138,7 @@ static void vc_execute(s64 cmd)
+ 		term_exec(buf->s, buf->s_n, cmd)
+ }
+ 
++/** @brief Push "<arg><cmd>" as pending input. */
+ static void vi_argcmd(s64 arg, char cmd)
+ {
+ 	char str[32];
+@@ -2043,6 +2147,7 @@ static void vi_argcmd(s64 arg, char cmd)
+ 	term_push(str, cs - str + 1);
+ }
+ 
++/* clamp cursor_row to the buffer and scroll so it is visible */
+ #define topfix() \
+ if (cursor_row < 0 || cursor_row >= lbuf_len(xb)) \
+ 	cursor_row = lbuf_len(xb) ? lbuf_len(xb) - 1 : 0; \
+@@ -2070,6 +2175,10 @@ if (xlw) { \
+ 		term_pos(cursor_row - view_top_row, (pos) + (lncol)); \
+ } \
+ 
++/**
++ * @brief Vi main loop: read and execute normal-mode commands until quit_state.
++ * @param init  draw the screen before the first command
++ */
+ void vi(s64 init)
+ {
+ 	char *ln, *cs;
+@@ -2764,6 +2873,7 @@ void vi(s64 init)
+ 		topfix()
+ 		ln = lbuf_get(xb, cursor_row);
+ 		cursor_off = ren_noeol(ln, cursor_off);
++		/* cursor on a zero-width char: move to the nearest visible one, in the direction of travel */
+ 		if (ln && !rstate->wid[cursor_off]) {
+ 			for (n = cursor_off, k = n; k < rstate->n && !rstate->wid[k];) {
+ 				if (!k)
+@@ -2981,11 +3091,13 @@ static void vi_rendpost(s64 mod, s64 otop, s64 otopsub, s64 oleft,
+ 		vi_rendloop(r);
+ }
+ 
++/** @brief SIGWINCH handler: count resizes in term_winch. */
+ static void sighandler(int signo)
+ {
+ 	term_winch++;
+ }
+ 
++/** @brief Install the SIGWINCH handler. */
+ static void setup_signals(void)
+ {
+ 	struct sigaction sa;
+@@ -2994,6 +3106,7 @@ static void setup_signals(void)
+ 	sigaction(SIGWINCH, &sa, NULL);
+ }
+ 
++/** @brief Parse -aemsv options, open files, and run vi() or ex(). */
+ int main(int argc, char *argv[])
+ {
+ 	s64 i, j;

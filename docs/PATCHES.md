@@ -54,11 +54,17 @@ Note: a script can exit OK after a failed anchor, having written only part of it
 
 ## Build and verification
 
+- `make` builds the same binary as `sh ./cbuild.sh build` (compared after `strip`), with the same flags. `scripts/rebuild-aws.sh` checks both the flag sets and the binaries.
+- `cbuild.sh` builds with `-std=c99 -pthread` and the warning flags; the reference binary below is built without them (`cc vi.c <tree-sitter sources> -D_DEFAULT_SOURCE -I... -O2 -D_POSIX_C_SOURCE=200809L`), so the two binaries differ. Each is stable on its own.
 - `sh ./cbuild.sh build` passes. `-Wall` leaves one warning, at `ren.c:133`. It's a false positive: it only fires for a line longer than 2^63 characters. The 32-bit code has the same shape, and `64bit` just made GCC's size check notice it.
 - The first build downloads the pinned tree-sitter sources, so builds are reproducible.
 - Every patch commit was built and given a quick session test.
 - The final binary passed normal and ex editing, `:wqa`, tab completion, spell replace, and a substitution over 300k lines.
 - The reference binary for the rename check on this branch is `/workspace/scratch/nextvi-patched-base.bin` (sha256 `f2aa0fe9…efaf`, rebuilt at `22b2d5b9`). Two separate builds are byte-identical, and the rename replay is checked against it, not `b1c78886`.
+
+## Rebuilding
+
+`scripts/rebuild-aws.sh <upstream-ref>` replays everything on this page, plus the renames and docs, from `patches/aws/`: the patch scripts come from the pinned `patches` commit `08a66e3c`, and the hand edits are `git format-patch` files. The known anchor reports in the table above are listed as `expect` lines in `patches/aws/series`; any other report stops the rebuild.
 
 ## Dependencies
 

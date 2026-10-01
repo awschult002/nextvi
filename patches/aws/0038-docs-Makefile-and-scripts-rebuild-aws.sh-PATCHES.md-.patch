@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Thu, 1 Oct 2026 12:19:38 +0000
+Subject: [PATCH] docs: Makefile and scripts/rebuild-aws.sh (PATCHES.md,
+ ARCHITECTURE.md)
+
+---
+ docs/ARCHITECTURE.md | 6 +++---
+ docs/PATCHES.md      | 6 ++++++
+ 2 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 877d7b48..4619e0ff 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -4,7 +4,7 @@ This page is for someone who wants to change the editor. Read it before opening
+ 
+ ## 1. It is a unity build
+ 
+-`cbuild.sh` compiles only `vi.c`, and `vi.c` `#include`s every other `.c` file. This branch is upstream plus the patches listed in [`PATCHES.md`](PATCHES.md), which add `agent.c`, `lsp.c` and `treesitter.c`:
++`cbuild.sh` (or `make`) compiles only `vi.c`, and `vi.c` `#include`s every other `.c` file. This branch is upstream plus the patches listed in [`PATCHES.md`](PATCHES.md), which add `agent.c`, `lsp.c` and `treesitter.c`:
+ 
+ ```
+ vi.c          main(), the normal-mode loop, screen redraw (vi_drawrow, paint thread)
+@@ -56,12 +56,12 @@ Upstream is `kyx0r/nextvi`, which is still active. **Order for an upstream merge
+ 
+ **Branches on the fork.** `master` is a plain mirror of `kyx0r/nextvi`: sync it from upstream and never commit to it. `AWS` is Alex's build. It starts at the same upstream commit as `master`, then come the patches (`PATCHES.md`), then the renames and comments (`RENAMES.md`), then Alex's configuration. Branches merge into `AWS` with a merge commit, never squash or rebase, because `PATCHES.md` and this doc cite commits by SHA.
+ 
+-**Rebuild `AWS` when upstream changes; don't merge `master` into it.** Once the renames are in, almost every upstream commit touches a renamed line, so merging would conflict everywhere. Instead:
++**Rebuild `AWS` when upstream changes; don't merge `master` into it.** Once the renames are in, almost every upstream commit touches a renamed line, so merging would conflict everywhere. Instead, run `scripts/rebuild-aws.sh <upstream-ref>`. It follows `patches/aws/series` and does steps 2 to 4 below, stopping at the first failing anchor, conflict or check:
+ 
+ 1. Sync `master` with `kyx0r`.
+ 2. Start a fresh branch from it. Run the 16 patch scripts in the `PATCHES.md` order and cherry-pick the fix commits.
+ 3. Build that tree and save the binary as the **new reference**. A stored sha such as `f2aa0fe9…efaf` is only valid for one upstream commit.
+ 4. Replay the four rename tables, then cherry-pick the `LN_*` and comment commits. Check the binary against the new reference after each step, then run `unmapped.sh`.
+-5. Cherry-pick the configuration commits, tag the old `AWS` (for example `AWS-1635521b`), and move `AWS` to the new branch.
++5. Cherry-pick the configuration commits, tag the old `AWS` (for example `AWS-1635521b`), and move `AWS` to the new branch. `rebuild-aws.sh -t` prints those git commands; it never pushes.
+ 
+ The renames replay cleanly. The fix commits, the `LN_*` enum and the one-commit-per-file comment commits are cherry-picks, and they can conflict where upstream changed nearby code. That's where a rebuild needs a person. To keep rebuilds cheap, put the configuration in as few commits as possible, and keep it out of the files the patches touch most.
+diff --git a/docs/PATCHES.md b/docs/PATCHES.md
+index 4f093d57..fb95ae35 100644
+--- a/docs/PATCHES.md
++++ b/docs/PATCHES.md
+@@ -54,12 +54,18 @@ Note: a script can exit OK after a failed anchor, having written only part of it
+ 
+ ## Build and verification
+ 
++- `make` builds the same binary as `sh ./cbuild.sh build` (compared after `strip`), with the same flags. `scripts/rebuild-aws.sh` checks both the flag sets and the binaries.
++- `cbuild.sh` builds with `-std=c99 -pthread` and the warning flags; the reference binary below is built without them (`cc vi.c <tree-sitter sources> -D_DEFAULT_SOURCE -I... -O2 -D_POSIX_C_SOURCE=200809L`), so the two binaries differ. Each is stable on its own.
+ - `sh ./cbuild.sh build` passes. `-Wall` leaves one warning, at `ren.c:133`. It's a false positive: it only fires for a line longer than 2^63 characters. The 32-bit code has the same shape, and `64bit` just made GCC's size check notice it.
+ - The first build downloads the pinned tree-sitter sources, so builds are reproducible.
+ - Every patch commit was built and given a quick session test.
+ - The final binary passed normal and ex editing, `:wqa`, tab completion, spell replace, and a substitution over 300k lines.
+ - The reference binary for the rename check on this branch is `/workspace/scratch/nextvi-patched-base.bin` (sha256 `f2aa0fe9…efaf`, rebuilt at `22b2d5b9`). Two separate builds are byte-identical, and the rename replay is checked against it, not `b1c78886`.
+ 
++## Rebuilding
++
++`scripts/rebuild-aws.sh <upstream-ref>` replays everything on this page, plus the renames and docs, from `patches/aws/`: the patch scripts come from the pinned `patches` commit `08a66e3c`, and the hand edits are `git format-patch` files. The known anchor reports in the table above are listed as `expect` lines in `patches/aws/series`; any other report stops the rebuild.
++
+ ## Dependencies
+ 
+ - Build: the first build downloads tree-sitter over the network, pinned to the commits above.

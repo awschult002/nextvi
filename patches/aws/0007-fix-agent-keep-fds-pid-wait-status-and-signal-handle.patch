@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Wed, 30 Sep 2026 21:26:32 +0000
+Subject: [PATCH] fix: agent: keep fds/pid/wait status and signal-handler
+ pointers int after 64bit
+
+64bit.sh turned agent_process()'s locals into s64: pipe(), waitpid() and signal() need int[2], int* and void (*)(int) (GCC 14: incompatible-pointer-types errors). Restored that declaration to int; also %ld -> %d for cJSON_GetArraySize() (int, cJSON kept unconverted).
+---
+ agent.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/agent.c b/agent.c
+index a3cf9b56..6cb2f3f9 100644
+--- a/agent.c
++++ b/agent.c
+@@ -478,9 +478,9 @@ static sbuf *agent_process(char **argv, sbuf *input, s64 *status, s64 http,
+ {
+ 	FILE *in = tmpfile();
+ 	struct pollfd fds[3];
+-	s64 output[2] = {-1, -1}, error[2] = {-1, -1}, pid, done = 0, st = 0,
++	int output[2] = {-1, -1}, error[2] = {-1, -1}, pid, done = 0, st = 0,
+ 		killed = 0, tidx = http ? 2 : 1, interactive = !http && xish;
+-	void (*old_ttou)(s64) = SIG_DFL, (*old_ttin)(s64) = SIG_DFL;
++	void (*old_ttou)(int) = SIG_DFL, (*old_ttin)(int) = SIG_DFL;
+ 	char buf[4097];
+ 	sbuf *sb, *eb = NULL;
+ 	if (errout)
+@@ -1269,7 +1269,7 @@ static void *ec_ast(char *loc, char *cmd, char *arg)
+ 				sums[r] += strlen(content->valuestring);
+ 		}
+ 		char *json = cJSON_PrintUnformatted(agent_messages);
+-		snprintf(msg, sizeof(msg), "context    %ld messages, %ld bytes payload",
++		snprintf(msg, sizeof(msg), "context    %d messages, %ld bytes payload",
+ 			cJSON_GetArraySize(agent_messages),
+ 			json ? (long)strlen(json) : 0);
+ 		ex_print(msg, msg_ft)

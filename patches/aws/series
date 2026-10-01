@@ -1,0 +1,93 @@
+# Rebuild recipe for the AWS branch, read by scripts/rebuild-aws.sh.
+# Steps run top to bottom; see the script header for the step types.
+# The *.patch files are `git format-patch` output of the AWS commits (fd4d2928
+# is split in two around its scripted rename). To add a hand edit, commit it
+# on AWS, export it with `git format-patch -1 --zero-commit --no-signature`
+# and add an `am` line where it belongs.
+
+# kyx0r/nextvi `patches` branch commit the 16 patch scripts come from.
+patches-commit 08a66e3c79443478037e13042b8392d0e2890757 https://github.com/kyx0r/nextvi
+# upstream commit the current AWS is built on (written by selfcopy; read by the export guard)
+upstream-base 1635521baf481c152afb94c64e6906652af15e28
+
+# --- 16 patch scripts (docs/PATCHES.md order) with their fix commits ---
+script lsp
+script rstr
+script threaded_redraw
+script threaded_search
+script visual
+script incsearch
+script detect_indent
+script tab_complete
+script linewrap_v2
+am 0001-fix-conf.c-ex_ft-highlight-restore-sw-et-idt-and-tc-.patch
+script filetype_shebang
+script treesitter
+script agent QF2=1
+am 0002-fix-agent-add-EO-ar-EO-gr-option-handlers-move-_EO-a.patch
+am 0003-fix-conf.c-ex_ft-highlight-merge-option-command-name.patch
+script alternate-w-behaviour
+script writeall
+script spell
+script 64bit
+am 0004-fix-64bit-keep-vendored-cJSON.c-cJSON.h-at-their-ori.patch
+am 0005-fix-spell-spell_cmp-must-return-int-for-qsort-64bit-.patch
+am 0006-fix-treesitter-ts_capture_cmp-must-return-int-for-qs.patch
+am 0007-fix-agent-keep-fds-pid-wait-status-and-signal-handle.patch
+am 0008-docs-add-PATCHES.md-order-anchors-fixes-verification.patch
+am 0009-fix-pin-tree-sitter-sources.patch
+am 0010-fix-64bit-keep-exspec.h-documentation-strings-verbat.patch
+am 0011-fix-64bit-cmd_pipe-wait-into-an-int-then-widen-the-s.patch
+am 0012-docs-PATCHES-tree-sitter-pin-64bit-review-fixes-ren..patch
+am 0013-docs-PATCHES-key_remap_cmds-declined.patch
+
+# --- build files (not from kyx0r) ---
+am 0014-build-add-a-plain-Makefile-same-flags-and-binary-as-.patch
+
+# build the patched tree; its binary is the reference for everything below
+ref
+
+# --- readable names: tooling, the four tables, LN_*, comments, docs ---
+am 0015-scripts-rename-tooling.patch
+am 0016-scripts-rename.sh-allow-listed-member-name-overlaps-.patch
+am 0017-scripts-rename.sh-do-not-rename-inside-string-or-cha.patch
+rename globals rename globals (scripts/renames-globals.tsv)
+rename term rename terminal globals (scripts/renames-term.tsv)
+rename vi-lnum rename vi line-number globals (scripts/renames-vi-lnum.tsv)
+am 0018-docs-ARCHITECTURE.md-for-patched-tree-file-map-threa.patch
+am 0019-vi.c-name-line-number-mode-flags-LN_.patch
+am 0020-docs-term.c-doxygen-comments.patch
+am 0021-docs-kmap.h-doxygen-comments.patch
+am 0022-docs-lbuf.c-doxygen-comments.patch
+am 0023-docs-regex.c-doxygen-and-lookaround-comments.patch
+am 0024-docs-uc.c-doxygen-comments.patch
+am 0025-docs-ren.c-doxygen-comments.patch
+am 0026-docs-conf.c-doxygen-comments.patch
+am 0027-docs-led.c-doxygen-comments.patch
+am 0028-docs-vi.h-doxygen-comments.patch
+am 0029-docs-ex.c-doxygen-comments.patch
+am 0030-docs-vi.c-doxygen-comments.patch
+am 0031-docs-add-Doxyfile-from-refactor-readable-names.patch
+am 0032-scripts-unmapped.sh-scans-every-.c-.h-for-file-scope.patch
+am 0033-renames-add-renames-patches.tsv-and-keep-list-entrie.patch
+rename patches rename patch-added globals (scripts/renames-patches.tsv)
+am 0034-renames-was-.-notes-and-RENAMES.md-section-for-renam.patch
+unmapped
+am 0035-docs-RENAMES.md-name-all-four-tables-tidy-unmapped.s.patch
+am 0036-docs-ARCHITECTURE.md-branch-model-master-mirrors-ups.patch
+am 0037-docs-ARCHITECTURE.md-rebuild-AWS-on-upstream-sync-re.patch
+am 0038-docs-Makefile-and-scripts-rebuild-aws.sh-PATCHES.md-.patch
+am 0039-docs-rebuild-steps-use-rebuild-aws.sh-and-git-am-USA.patch
+
+# hand edits exported with --export (they land here), then this script and patches/aws
+am 0040-docs-ARCHITECTURE.md-export-guard-and-rebuild-aws.sh.patch
+selfcopy
+
+# Known anchor reports (DBG1=1) that are not failures; see docs/PATCHES.md.
+expect tab_complete FAIL led.c:813:r232
+expect tab_complete FAIL led.c:813:r232:m2
+expect tab_complete mark not set
+expect treesitter FAIL vi.c:170
+expect treesitter FAIL vi.c:170:m3
+expect treesitter mark not set
+expect agent FAIL ex.c:1707:m22

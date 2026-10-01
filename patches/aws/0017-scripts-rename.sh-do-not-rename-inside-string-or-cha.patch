@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Thu, 1 Oct 2026 01:10:29 +0000
+Subject: [PATCH] scripts/rename.sh: do not rename inside string or char
+ literals
+
+agent.sh adds an invalid-range message to ex.c with the literal text "xoff:%ld xrow:%ld"; the whole-file substitution rewrote it to "cursor_off:... cursor_row:...", changing program output and the binary. Literals are now skipped; code and comments are still renamed.
+---
+ scripts/rename.sh | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/scripts/rename.sh b/scripts/rename.sh
+index b422cf3a..68ad61cf 100755
+--- a/scripts/rename.sh
++++ b/scripts/rename.sh
+@@ -9,6 +9,7 @@
+ # changed). Also renames tmp<old> locals made by preserve()/restore() in vi.h.
+ # If ex.c still has the upstream EO(opt) macro (which pastes x##opt), it is
+ # first rewritten to EO(opt, var) so option globals can be renamed.
++# Names inside string and char literals are left alone (they are output).
+ set -e
+ tbl=$1
+ [ -f "$tbl" ] || { echo "usage: $0 table.tsv" >&2; exit 2; }
+@@ -47,8 +48,14 @@ if grep -q 'x##opt' ex.c; then
+ 	grep -q 'x##opt' ex.c && { echo "EO() macro rewrite failed; see ex.c" >&2; exit 1; }
+ 	echo "rewrote EO(opt) -> EO(opt, var) in ex.c"
+ fi
++# Rename in code and comments, but never inside string or char literals:
++# those are program output (e.g. ex.c's "xoff:%ld xrow:%ld" range message).
+ while IFS='	' read -r old new; do
+-	perl -pi -e "s/\\b(tmp)?\Q$old\E\\b/\$1$new/g" *.c *.h
++	OLD=$old NEW=$new perl -0777 -pi -e '
++		my ($o, $n) = ($ENV{OLD}, $ENV{NEW});
++		s{(/\*.*?\*/|//[^\n]*)|(\x27(?:\\.|[^\x27\\\n])*\x27|"(?:\\.|[^"\\\n])*")|([^/"\x27]+|.)}{
++			defined $2 ? $2 : do { (my $t = defined $1 ? $1 : $3) =~ s/\b(tmp)?\Q$o\E\b/(defined $1 ? $1 : "") . $n/ge; $t }
++		}gse' *.c *.h
+ done < "$todo"
+ echo "renamed $(wc -l < "$todo") names"
+ 

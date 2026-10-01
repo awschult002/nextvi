@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Wed, 30 Sep 2026 21:22:20 +0000
+Subject: [PATCH] fix: conf.c ex_ft highlight: merge option/command names
+ clobbered by agent
+
+agent.sh replaces the ex_ft regex option/command lines wholesale (its diff is against pristine master), dropping lsp|, lw|, hl(?:lw|...), sw|et|idt| and tc|. Rebuilt the two lines as master + every patch's additions. This also restores master's m!? and \\?~ tokens that linewrap_v2's stale diff had removed (m! was added to master in 09a9e711, after that diff was made). Highlighting only.
+---
+ conf.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/conf.c b/conf.c
+index ede9cb6e..07a8fc1d 100644
+--- a/conf.c
++++ b/conf.c
+@@ -346,8 +346,8 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
+ (?:'[0-9]+)|([.%$]|[0-9 \t]*)?))(?:([-*-+/%])[ \t]*[0-9]+[ \t]*)*(?:[ \t]*\\|(?:[^|\\\\]|\\\\.?)*\\|?[ \t]*)*)[ \t]*\
+ (?:([,;]#?)[ \t]*((?:\\|(?:[^|\\\\]|\\\\.?)*\\|?[ \t]*)*(?:(?:<(?:[^<\\\\]|\\\\.?)*<?|>(?:[^>\\\\]|\\\\.?)*>?)|\
+ (?:'[0-9]+)|([.$]|[0-9 \t]*)?))(?:([-*-+/%])[ \t]*([0-9]+)[ \t]*)*(?:[ \t]*\\|(?:[^|\\\\]|\\\\.?)*\\|?)*[ \t]*)*)\
+-((pac|pr|aco!?|ai|ar|aspec|ish|err|fr|ic|grp|mpt|rr|shape|seq|ts|td|order|hl[lwpr]?|left|lim|led|vis)\
+-|[@&!dj]|m!?|=\\?{0,1}|\\?~|\\?{1,2}[?!]?|b[psx]?|p[uh]?|aretry|apack!?|acm?|ast|a[!~]?|exspec|e[f!]?!?|f[-+><tdp]?|inc|i|sc!?|\
++((pac|sw|et|idt|pr|aco!?|ai|ar|aspec|ish|err|fr|ic|grp|mpt|rr|shape|seq|ts|td|tc|order|hl(?:lw|[lwpr])?|left|lim|led|vis)\
++|[@&!dj]|m!?|=\\?{0,1}|\\?~|\\?{1,2}[?!]?|b[psx]?|p[uh]?|aretry|apack!?|acm?|ast|a[!~]?|exspec|e[f!]?!?|f[-+><tdp]?|inc|i|sc!?|lsp|lw|\
+ (?:g!?|s)[ \t]?(.)?|q!?|reg?\\+?|rd?|w(?:q!|[q!])?|u[czbd]|x!?|ya[!+]?|cm!?|cd?)?",
+ 		A(BL1 | SYN_BD, RE, RE, RE, RE, WH1, MA1, RE, RE, WH1, RE, GR1, CY1, MA1)},
+ 	{ex_ft, "\\\\(.)", A(AY1 | SYN_BD, YE)},

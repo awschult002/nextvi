@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Thu, 1 Oct 2026 01:08:49 +0000
+Subject: [PATCH] scripts/rename.sh: allow listed member-name overlaps; check
+ collisions before touching EO()
+
+treesitter.sh adds struct ts_state member capture_n, which made the xcid_n -> capture_n row a 'collision' although a member is a separate namespace. New scripts/renames-allow.txt lists such names; they are renamed with an 'allowed overlap' note. The EO(opt) -> EO(opt, var) rewrite of ex.c now runs after the collision check, so an aborted run no longer leaves ex.c modified.
+---
+ scripts/rename.sh         | 21 +++++++++++++--------
+ scripts/renames-allow.txt |  3 +++
+ 2 files changed, 16 insertions(+), 8 deletions(-)
+ create mode 100644 scripts/renames-allow.txt
+
+diff --git a/scripts/rename.sh b/scripts/rename.sh
+index bcfa394f..b422cf3a 100755
+--- a/scripts/rename.sh
++++ b/scripts/rename.sh
+@@ -14,24 +14,23 @@ tbl=$1
+ [ -f "$tbl" ] || { echo "usage: $0 table.tsv" >&2; exit 2; }
+ cd "$(dirname "$0")/.."
+ 
+-if grep -q 'x##opt' ex.c; then
+-	perl -0pi -e 's/#define EO\(opt\) \\\n\t_EO\(opt, x##opt = \*arg \? eo_val\(arg\) : !x##opt; return NULL;\)/#define EO(opt, var) \\\n\t_EO(opt, var = *arg ? eo_val(arg) : !var; return NULL;)/;
+-		s/(return NULL;\)\n\n)((?:EO\(\w+\)[ \n]*)+)/my ($h, $b) = ($1, $2); $b =~ s#EO\((\w+)\)#EO($1, x$1)#g; $h . $b/e' ex.c
+-	grep -q 'x##opt' ex.c && { echo "EO() macro rewrite failed; see ex.c" >&2; exit 1; }
+-	echo "rewrote EO(opt) -> EO(opt, var) in ex.c"
+-fi
+-
+ # Code with comments and string literals blanked, so names in doc comments
+ # such as "(was xai)" do not count as uses.
+ code=$(mktemp)
+ perl -0777 -pe 's{/\*.*?\*/|//[^\n]*|\x27(?:\\.|[^\x27\\\n])*\x27|"(?:\\.|[^"\\\n])*"}{ }gs' *.c *.h > "$code"
+ has() { grep -qw -- "$1" "$code"; }
++# New names that may already exist as something the rename cannot clash with
++# (a struct member is a separate namespace), one per line, # comments allowed.
++allowed() { grep -v '^#' scripts/renames-allow.txt 2>/dev/null | cut -f1 | grep -qx -- "$1"; }
+ todo=$(mktemp)
+ trap 'rm -f "$todo" "$code"' EXIT
+ bad=0
+ while IFS='	' read -r old new; do
+ 	[ -z "$old" ] && continue
+-	if has "$old" && has "$new"; then
++	if has "$old" && has "$new" && allowed "$new"; then
++		echo "allowed overlap: $old -> $new ($new exists, listed in renames-allow.txt)"
++		printf '%s\t%s\n' "$old" "$new" >> "$todo"
++	elif has "$old" && has "$new"; then
+ 		echo "collision: $new already used while $old still exists" >&2; bad=1
+ 	elif has "$old"; then
+ 		printf '%s\t%s\n' "$old" "$new" >> "$todo"
+@@ -42,6 +41,12 @@ while IFS='	' read -r old new; do
+ 	fi
+ done < "$tbl"
+ [ $bad = 0 ] || exit 1
++if grep -q 'x##opt' ex.c; then
++	perl -0pi -e 's/#define EO\(opt\) \\\n\t_EO\(opt, x##opt = \*arg \? eo_val\(arg\) : !x##opt; return NULL;\)/#define EO(opt, var) \\\n\t_EO(opt, var = *arg ? eo_val(arg) : !var; return NULL;)/;
++		s/(return NULL;\)\n\n)((?:EO\(\w+\)[ \n]*)+)/my ($h, $b) = ($1, $2); $b =~ s#EO\((\w+)\)#EO($1, x$1)#g; $h . $b/e' ex.c
++	grep -q 'x##opt' ex.c && { echo "EO() macro rewrite failed; see ex.c" >&2; exit 1; }
++	echo "rewrote EO(opt) -> EO(opt, var) in ex.c"
++fi
+ while IFS='	' read -r old new; do
+ 	perl -pi -e "s/\\b(tmp)?\Q$old\E\\b/\$1$new/g" *.c *.h
+ done < "$todo"
+diff --git a/scripts/renames-allow.txt b/scripts/renames-allow.txt
+new file mode 100644
+index 00000000..3d86abae
+--- /dev/null
++++ b/scripts/renames-allow.txt
+@@ -0,0 +1,3 @@
++# New names allowed to coexist with an existing identifier of the same
++# spelling that the rename cannot clash with. Name<TAB>reason. Read by rename.sh.
++capture_n	treesitter.c struct ts_state member (s->capture_n), added by treesitter.sh; separate namespace from the ex.c global

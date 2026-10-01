@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Wed, 30 Sep 2026 21:38:13 +0000
+Subject: [PATCH] fix: 64bit: cmd_pipe: wait into an int, then widen the status
+
+64bit.sh rewrote waitpid(pid, status, 0) as waitpid(pid, (int*)status, 0) with status now s64 *: waitpid stores 4 bytes into an 8-byte object, leaving the upper half untouched. It only works because every caller (ec_exec/pipe, spell's ec_spell) zero-initializes ret and x86-64 is little-endian; on big-endian the status would land in the high half. Wait into a local int and assign; NULL status still allowed.
+---
+ term.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/term.c b/term.c
+index 7675dc07..05824544 100644
+--- a/term.c
++++ b/term.c
+@@ -377,7 +377,10 @@ sbuf *cmd_pipe(char *cmd, sbuf *ibuf, s64 oproc, s64 *status)
+ 		close(ofd);
+ 	if (fds[1].fd >= 0)
+ 		close(ifd);
+-	waitpid(pid, (int*)status, 0);
++	int wst = 0;
++	waitpid(pid, &wst, 0);
++	if (status)
++		*status = wst;
+ 	signal(SIGTTOU, SIG_IGN);
+ 	tcsetpgrp(term_ufd.fd, getpgrp());
+ 	signal(SIGTTOU, SIG_DFL);

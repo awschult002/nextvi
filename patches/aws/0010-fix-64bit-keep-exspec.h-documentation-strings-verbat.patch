@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Wed, 30 Sep 2026 21:35:48 +0000
+Subject: [PATCH] fix: 64bit: keep exspec.h documentation strings verbatim
+
+exspec.h is text generated from README (cbuild.sh spec) and served by :exspec / to the agent. 64bit.sh's blanket rewrite changed the examples: 'int' -> 's64' in the %s/(int)|(void)/ and f>int examples, and the ex command example ':b-1:%d:b-1' -> ':b-1:%ld:b-1' (%d is the ex delete-all range here, not a printf format; %ld is not valid). Restored the strings from the pre-64bit file; the exspec_cmds struct fields stay s64.
+---
+ exspec.h | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/exspec.h b/exspec.h
+index 592dbe08..9c489361 100644
+--- a/exspec.h
++++ b/exspec.h
+@@ -299,10 +299,10 @@ static char *exspec_lines[] = {
+ 	"literal.",
+ 	"",
+ 	"Example: substitution backreference",
+-	"this is an example text for subs and has s64 or void",
+-	"%s/(s64)|(void)/pre\\0after",
++	"this is an example text for subs and has int or void",
++	"%s/(int)|(void)/pre\\0after",
+ 	"this is an example text for subs and has preintafter or void",
+-	"%s/(s64)|(void)/pre\\2after/g",
++	"%s/(int)|(void)/pre\\2after/g",
+ 	"this is an example text for subs and has prepreafterafter or prevoidafter",
+ 	"",
+ 	"Example: global replacement with <g>",
+@@ -530,7 +530,7 @@ static char *exspec_lines[] = {
+ 	"Example: switch to the /sc/ scratch buffer",
+ 	"b-3",
+ 	"Example: clear history and return to previous (#) main buffer",
+-	"b-1:%ld:b-1",
++	"b-1:%d:b-1",
+ 	"",
+ 	"bp[path]",
+ 	"Set current buffer path",
+@@ -691,7 +691,7 @@ static char *exspec_lines[] = {
+ 	"Inverted conditional",
+ 	"",
+ 	"Example: inverted capture",
+-	"f>int:1\?\?!:1\?\?p s64 was absent",
++	"f>int:1\?\?!:1\?\?p int was absent",
+ 	"",
+ 	"{prefix}\?\?\?",
+ 	"Evaluate capture ids",
