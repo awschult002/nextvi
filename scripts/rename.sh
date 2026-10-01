@@ -9,6 +9,7 @@
 # changed). Also renames tmp<old> locals made by preserve()/restore() in vi.h.
 # If ex.c still has the upstream EO(opt) macro (which pastes x##opt), it is
 # first rewritten to EO(opt, var) so option globals can be renamed.
+# Names inside string and char literals are left alone (they are output).
 set -e
 tbl=$1
 [ -f "$tbl" ] || { echo "usage: $0 table.tsv" >&2; exit 2; }
@@ -47,8 +48,14 @@ if grep -q 'x##opt' ex.c; then
 	grep -q 'x##opt' ex.c && { echo "EO() macro rewrite failed; see ex.c" >&2; exit 1; }
 	echo "rewrote EO(opt) -> EO(opt, var) in ex.c"
 fi
+# Rename in code and comments, but never inside string or char literals:
+# those are program output (e.g. ex.c's "xoff:%ld xrow:%ld" range message).
 while IFS='	' read -r old new; do
-	perl -pi -e "s/\\b(tmp)?\Q$old\E\\b/\$1$new/g" *.c *.h
+	OLD=$old NEW=$new perl -0777 -pi -e '
+		my ($o, $n) = ($ENV{OLD}, $ENV{NEW});
+		s{(/\*.*?\*/|//[^\n]*)|(\x27(?:\\.|[^\x27\\\n])*\x27|"(?:\\.|[^"\\\n])*")|([^/"\x27]+|.)}{
+			defined $2 ? $2 : do { (my $t = defined $1 ? $1 : $3) =~ s/\b(tmp)?\Q$o\E\b/(defined $1 ? $1 : "") . $n/ge; $t }
+		}gse' *.c *.h
 done < "$todo"
 echo "renamed $(wc -l < "$todo") names"
 
