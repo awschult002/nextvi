@@ -1,0 +1,61 @@
+# nextvi is a unity build: vi.c #includes every other .c file, so there is
+# one rule for vi; -MMD lists the included files in vi.d. The only other
+# objects are the pinned tree-sitter runtime and C grammar (treesitter patch).
+# Same flags as `sh ./cbuild.sh build` on Linux; scripts/rebuild-aws.sh
+# checks both the flags and the binary.
+all: vi
+
+CC = cc
+CFLAGS = -O2
+WFLAGS = -pedantic -Wall -Wextra -Wno-implicit-fallthrough \
+	-Wno-missing-field-initializers -Wno-unused-parameter \
+	-Wno-unused-result -Wfatal-errors
+ALLFLAGS = ${WFLAGS} -std=c99 -pthread ${CFLAGS}
+LDLIBS = -lpthread
+
+# tree-sitter v0.25.10 and tree-sitter-c v0.24.1, pinned by commit
+TS_SHA = da6fe9beb4f7f67beb75914ca8e0d48ae48d6406
+TSC_SHA = 7fa1be1b694b6e763686793d97da01f36a0e5c12
+TS = .treesitter/tree-sitter-${TS_SHA}
+TSC = .treesitter/tree-sitter-c-${TSC_SHA}
+TS_SRC = ${TS}/lib/src/lib.c ${TSC}/src/parser.c
+TS_OBJ = ts_lib.o ts_parser.o
+CPPFLAGS = -D_DEFAULT_SOURCE -I${TS}/lib/include -I${TS}/lib/src -I${TSC}/src \
+	-D_POSIX_C_SOURCE=200809L
+
+-include vi.d
+vi: vi.c ${TS_OBJ}
+	${CC} ${CPPFLAGS} ${ALLFLAGS} -MMD -o $@ vi.c ${TS_OBJ} ${LDLIBS}
+
+ts_lib.o: | ts
+	${CC} ${CPPFLAGS} ${ALLFLAGS} -c -o $@ ${TS}/lib/src/lib.c
+ts_parser.o: | ts
+	${CC} ${CPPFLAGS} ${ALLFLAGS} -c -o $@ ${TSC}/src/parser.c
+
+# Fetch the pinned sources once; a cached checkout must be exactly the pinned
+# commit with no local changes (the objects are built here, outside them).
+ts:
+	@set -e; fetch() { \
+		d=.treesitter/$$1-$$3; \
+		ok() { [ "$$(git -C "$$1" rev-parse HEAD 2>/dev/null)" = "$$2" ] && \
+			[ -z "$$(git -C "$$1" status --porcelain --untracked-files=all)" ]; }; \
+		if [ -d "$$d" ]; then ok "$$d" "$$3" && return 0; \
+			echo "$$d does not match $$1 $$2 ($$3); remove it to refetch" >&2; return 1; fi; \
+		mkdir -p .treesitter; rm -rf "$$d.tmp"; \
+		git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$$2" \
+			"https://github.com/tree-sitter/$$1" "$$d.tmp"; \
+		ok "$$d.tmp" "$$3" || { echo "unexpected revision for $$1 $$2" >&2; return 1; }; \
+		mv "$$d.tmp" "$$d"; }; \
+	fetch tree-sitter v0.25.10 ${TS_SHA}; \
+	fetch tree-sitter-c v0.24.1 ${TSC_SHA}
+
+# The flags and sources `vi` is built from (without the compiler, -MMD, -c
+# and -o), one per line; compared with cbuild.sh by
+# scripts/rebuild-aws.sh.
+print-flags:
+	@for t in ${CPPFLAGS} ${ALLFLAGS} ${LDLIBS} vi.c ${TS_SRC}; do echo "$$t"; done
+
+clean:
+	rm -f vi vi.d ${TS_OBJ}
+
+.PHONY: all ts print-flags clean
