@@ -4,7 +4,7 @@ This page is for someone who wants to change the editor. Read it before opening 
 
 ## 1. It is a unity build
 
-`cbuild.sh` compiles only `vi.c`, and `vi.c` `#include`s every other `.c` file. This branch is upstream plus the patches listed in [`PATCHES.md`](PATCHES.md), which add `agent.c`, `lsp.c` and `treesitter.c`:
+`cbuild.sh` (or `make`) compiles only `vi.c`, and `vi.c` `#include`s every other `.c` file. This branch is upstream plus the patches listed in [`PATCHES.md`](PATCHES.md), which add `agent.c`, `lsp.c` and `treesitter.c`:
 
 ```
 vi.c          main(), the normal-mode loop, screen redraw (vi_drawrow, paint thread)
@@ -56,12 +56,12 @@ Upstream is `kyx0r/nextvi`, which is still active. **Order for an upstream merge
 
 **Branches on the fork.** `master` is a plain mirror of `kyx0r/nextvi`: sync it from upstream and never commit to it. `AWS` is Alex's build. It starts at the same upstream commit as `master`, then come the patches (`PATCHES.md`), then the renames and comments (`RENAMES.md`), then Alex's configuration. Branches merge into `AWS` with a merge commit, never squash or rebase, because `PATCHES.md` and this doc cite commits by SHA.
 
-**Rebuild `AWS` when upstream changes; don't merge `master` into it.** Once the renames are in, almost every upstream commit touches a renamed line, so merging would conflict everywhere. Instead:
+**Rebuild `AWS` when upstream changes; don't merge `master` into it.** Once the renames are in, almost every upstream commit touches a renamed line, so merging would conflict everywhere. Instead, run `scripts/rebuild-aws.sh <upstream-ref>`. It follows `patches/aws/series` and does steps 2 to 4 below, stopping at the first failing anchor, conflict or check:
 
 1. Sync `master` with `kyx0r`.
 2. Start a fresh branch from it. Run the 16 patch scripts in the `PATCHES.md` order and cherry-pick the fix commits.
 3. Build that tree and save the binary as the **new reference**. A stored sha such as `f2aa0fe9…efaf` is only valid for one upstream commit.
 4. Replay the four rename tables, then cherry-pick the `LN_*` and comment commits. Check the binary against the new reference after each step, then run `unmapped.sh`.
-5. Cherry-pick the configuration commits, tag the old `AWS` (for example `AWS-1635521b`), and move `AWS` to the new branch.
+5. Cherry-pick the configuration commits, tag the old `AWS` (for example `AWS-1635521b`), and move `AWS` to the new branch. `rebuild-aws.sh -t` prints those git commands; it never pushes.
 
 The renames replay cleanly. The fix commits, the `LN_*` enum and the one-commit-per-file comment commits are cherry-picks, and they can conflict where upstream changed nearby code. That's where a rebuild needs a person. To keep rebuilds cheap, put the configuration in as few commits as possible, and keep it out of the files the patches touch most.
