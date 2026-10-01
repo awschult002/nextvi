@@ -56,12 +56,13 @@ Upstream is `kyx0r/nextvi`, which is still active. **Order for an upstream merge
 
 **Branches on the fork.** `master` is a plain mirror of `kyx0r/nextvi`: sync it from upstream and never commit to it. `AWS` is Alex's build. It starts at the same upstream commit as `master`, then come the patches (`PATCHES.md`), then the renames and comments (`RENAMES.md`), then Alex's configuration. Branches merge into `AWS` with a merge commit, never squash or rebase, because `PATCHES.md` and this doc cite commits by SHA.
 
-**Rebuild `AWS` when upstream changes; don't merge `master` into it.** Once the renames are in, almost every upstream commit touches a renamed line, so merging would conflict everywhere. Instead, run `scripts/rebuild-aws.sh <upstream-ref>`. It follows `patches/aws/series` and does steps 2 to 4 below, stopping at the first failing anchor, conflict or check:
+**Rebuild `AWS` when upstream changes; don't merge `master` into it.** Once the renames are in, almost every upstream commit touches a renamed line, so merging would conflict everywhere. Instead:
 
 1. Sync `master` with `kyx0r`.
-2. Start a fresh branch from it. Run the 16 patch scripts in the `PATCHES.md` order and cherry-pick the fix commits.
-3. Build that tree and save the binary as the **new reference**. A stored sha such as `f2aa0fe9…efaf` is only valid for one upstream commit.
-4. Replay the four rename tables, then cherry-pick the `LN_*` and comment commits. Check the binary against the new reference after each step, then run `unmapped.sh`.
-5. Cherry-pick the configuration commits, tag the old `AWS` (for example `AWS-1635521b`), and move `AWS` to the new branch. `rebuild-aws.sh -t` prints those git commands; it never pushes.
+2. Run `scripts/rebuild-aws.sh master`. It works on a new local branch in its own worktree and follows `patches/aws/series`. It runs the 16 patch scripts from the pinned `patches` commit, applies the fix commits with `git am`, builds that tree and saves the binary as the **new reference** (a stored sha such as `f2aa0fe9…efaf` is only valid for one upstream commit), replays the four rename tables, applies the `LN_*` and comment edits, and checks `unmapped.sh`. After the reference step, every step that changes a `.c` or `.h` file must keep the stripped binary identical. The script stops at the first failing anchor, conflict or check and names the step. It never pushes.
+3. Run `rebuild-aws.sh -t` to print the commands that tag the old `AWS` (for example `AWS-1635521b`) and move `AWS` to the new branch. Check them, then run them.
 
-The renames replay cleanly. The fix commits, the `LN_*` enum and the one-commit-per-file comment commits are cherry-picks, and they can conflict where upstream changed nearby code. That's where a rebuild needs a person. To keep rebuilds cheap, put the configuration in as few commits as possible, and keep it out of the files the patches touch most.
+A rebuild gives every commit a new SHA. SHAs cited in the docs point into the history before the rebuild, and the old tag keeps them reachable.
+
+**Where a rebuild needs a person:** conflicts in the `git am` files when upstream changed nearby code, updating `expect` lines in `series` and `unmapped.expected` when anchors move, and exporting any new hand edit on `AWS` into `patches/aws/` with `git format-patch` (otherwise the next rebuild drops it). To keep rebuilds cheap, put configuration in as few commits as possible, and keep it out of the files the patches touch most.
+
