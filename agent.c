@@ -363,7 +363,7 @@ static s64 agent_boundary(void)
 	if (agent_input_blocked)
 		return 1;
 	preserve(s64, agent_tool, agent_tool = 0;)
-	while (tibuf_pos < tibuf_cnt)
+	while (term_inbuf_pos < term_inbuf_count)
 		agent_key(term_read(0));
 	while (poll(&term_ufd, 1, 0) > 0 && term_ufd.revents & POLLIN)
 		agent_key(term_read(0));
@@ -374,7 +374,7 @@ static s64 agent_boundary(void)
 static void agent_capture_add(const char *s, s64 n)
 {
 	agent_capture_total += n;
-	if (xgr == 2)
+	if (opt_agent_guardrails == 2)
 		n = MIN(n, MAX(0, 4097 - agent_capture->s_n));
 	sbuf_mem(agent_capture, s, n)
 }
@@ -479,7 +479,7 @@ static sbuf *agent_process(char **argv, sbuf *input, s64 *status, s64 http,
 	FILE *in = tmpfile();
 	struct pollfd fds[3];
 	int output[2] = {-1, -1}, error[2] = {-1, -1}, pid, done = 0, st = 0,
-		killed = 0, tidx = http ? 2 : 1, interactive = !http && xish;
+		killed = 0, tidx = http ? 2 : 1, interactive = !http && opt_interactive_shell;
 	void (*old_ttou)(int) = SIG_DFL, (*old_ttin)(int) = SIG_DFL;
 	char buf[4097];
 	sbuf *sb, *eb = NULL;
@@ -632,10 +632,10 @@ static sbuf *agent_shell(char *cmd, sbuf *input, s64 oproc, s64 *status)
 {
 	char *sh = getenv("SHELL"),
 	     *argv[] = {sh && *sh ? sh : "sh",
-		xish ? "-i" : "-c", xish ? "-c" : cmd,
-		xish ? cmd : NULL, NULL};
+		opt_interactive_shell ? "-i" : "-c", opt_interactive_shell ? "-c" : cmd,
+		opt_interactive_shell ? cmd : NULL, NULL};
 	s64 st;
-	sbuf *out = agent_process(argv, input, &st, 0, !oproc && xgr == 2,
+	sbuf *out = agent_process(argv, input, &st, 0, !oproc && opt_agent_guardrails == 2,
 		NULL);
 	if (!out) {
 		agent_child_status = 1;
@@ -759,8 +759,8 @@ static char *agent_snapshot(char *loc)
 		(lbuf_get(xb, last) ? uc_slen(lbuf_get(xb, last)) : 0);
 	sbuf_smake(sb, 256)
 	snprintf(info, sizeof(info), "Editor snapshot\nbuffer %ld\nname ",
-		istempbuf(ex_buf) ?
-			(s64)(tempbufs-ex_buf-1) : (s64)(ex_buf-bufs));
+		istempbuf(cur_buf) ?
+			(s64)(tempbufs-cur_buf-1) : (s64)(cur_buf-bufs));
 	sbuf_str(sb, info)
 	sbuf_str(sb, xb_path)
 	snprintf(info, sizeof(info),
@@ -778,9 +778,9 @@ static void agent_resize(void)
 	struct winsize win;
 	if (!ioctl(term_ufd.fd, TIOCGWINSZ, &win)) {
 		if (win.ws_col)
-			xcols = win.ws_col;
+			term_cols = win.ws_col;
 		if (win.ws_row)
-			xrows = win.ws_row;
+			term_rows = win.ws_row;
 	}
 	term_winch = 0;
 	term_resized++;
@@ -795,7 +795,7 @@ static void agent_redraw(const char *draft)
 	if (draft)
 		sbuf_str(sb, draft);
 	sbuf_nul(sb)
-	s64 cap = MAX(2, xrows), *starts = emalloc(sizeof(s64) * cap);
+	s64 cap = MAX(2, term_rows), *starts = emalloc(sizeof(s64) * cap);
 	s64 rows = 1, col = 0;
 	starts[0] = 0;
 	for (s64 i = 0; i < sb->s_n; ) {
@@ -804,12 +804,12 @@ static void agent_redraw(const char *draft)
 		uc_code(code, s, n)
 		col += *s == '\t' ? 8 - col % 8 : MAX(0, uc_wid(code));
 		i += MAX(1, n);
-		if (newline || col >= MAX(1, xcols)) {
+		if (newline || col >= MAX(1, term_cols)) {
 			starts[rows++ % cap] = i;
 			col = 0;
 		}
 	}
-	s64 start = starts[MAX(0, rows - MAX(1, xrows-2)) % cap];
+	s64 start = starts[MAX(0, rows - MAX(1, term_rows-2)) % cap];
 	term_clean();
 	agent_output(sb->s + start);
 	free(starts);
@@ -820,27 +820,27 @@ static void agent_redraw(const char *draft)
 /* Recurse from the ex-style conversation into vi, preserving caller state. */
 static void agent_editor(void)
 {
-	preserve(s64, xvis, xvis = (xvis | 2) & ~1;)
+	preserve(s64, opt_startup_flags, opt_startup_flags = (opt_startup_flags | 2) & ~1;)
 	preserve(s64, agent_tool, agent_tool = 0;)
 	preserve(sbuf *, agent_capture, agent_capture = NULL;)
 	preserve(size_t, agent_capture_total, agent_capture_total = 0;)
 	preserve(s64, agent_cancel, agent_cancel = 0;)
 	preserve(s64, agent_pause, agent_pause = 0;)
-	preserve(s64, xesc, xesc = '\\';)
-	preserve(s64, xsep, xsep = ':';)
-	preserve(s64, xexp, xexp = '%';)
-	preserve(s64, xexe, xexe = '!';)
+	preserve(s64, ex_escape, ex_escape = '\\';)
+	preserve(s64, ex_separator, ex_separator = ':';)
+	preserve(s64, ex_expand_char, ex_expand_char = '%';)
+	preserve(s64, ex_shell_char, ex_shell_char = '!';)
 	led_modeswap();
-	restore(xexe)
-	restore(xexp)
-	restore(xsep)
-	restore(xesc)
+	restore(ex_shell_char)
+	restore(ex_expand_char)
+	restore(ex_separator)
+	restore(ex_escape)
 	restore(agent_pause)
 	restore(agent_cancel)
 	restore(agent_capture_total)
 	restore(agent_capture)
 	restore(agent_tool)
-	restore(xvis)
+	restore(opt_startup_flags)
 }
 
 static void agent_refresh(void)
@@ -853,10 +853,10 @@ static void agent_refresh(void)
 
 static void agent_sequence(void)
 {
-	for (s64 i = 0; i < xbufcur; i++)
-		bufs[i].lb->useq += xseq;
+	for (s64 i = 0; i < buf_count; i++)
+		bufs[i].lb->useq += opt_undo_seq;
 	for (s64 i = 0; i < LEN(tempbufs); i++)
-		tempbufs[i].lb->useq += xseq;
+		tempbufs[i].lb->useq += opt_undo_seq;
 }
 
 /* Return 1 for envelope errors, 2 for tool calls the model can correct. */
@@ -947,11 +947,11 @@ static void agent_run(const char *input)
 		/* Only complete tool batches reach this boundary. Manual/automatic
 		 * pack agents must never recursively trigger autocompaction. */
 		/* The threshold triggers a pack, not a hard cap on its result. */
-		if (compacted && agent_tokens() < xaco)
+		if (compacted && agent_tokens() < opt_autocompact_tokens)
 			compacted = 0;
-		if (xaco && !compacted && !agent_packing && agent_logbuf == 3 &&
-				agent_tokens() >= xaco) {
-			if (!agent_autocompact(input) || epoch != agent_epoch || xquit)
+		if (opt_autocompact_tokens && !compacted && !agent_packing && agent_logbuf == 3 &&
+				agent_tokens() >= opt_autocompact_tokens) {
+			if (!agent_autocompact(input) || epoch != agent_epoch || quit_state)
 				return;
 			/* The pack conversation was discarded. Start a fresh tool-round
 			 * budget for the resumed request, without recursing into agent_run. */
@@ -985,7 +985,7 @@ static void agent_run(const char *input)
 			agent_redraw(NULL);
 			agent_pause = 0;
 			if (serial != agent_serial ||
-					epoch != agent_epoch || xquit)
+					epoch != agent_epoch || quit_state)
 				return;
 			agent_log("RESULT",
 				"response skipped after recursive editing");
@@ -1051,7 +1051,7 @@ static void agent_run(const char *input)
 		/* Complete pairs before recursive editing or submissions. */
 		cJSON_AddItemToArray(agent_messages,
 			cJSON_Duplicate(message, 1));
-		if (xar) {
+		if (opt_agent_reasoning) {
 			cJSON *reasoning = cJSON_GetObjectItem(message,
 				"reasoning_content");
 			if (!cJSON_IsString(reasoning) || !*reasoning->valuestring)
@@ -1095,7 +1095,7 @@ static void agent_run(const char *input)
 					!*command->valuestring)
 				err = "ex requires a nonempty command string";
 			else {
-				s64 savedquit = xquit, savedqprop = xqprop;
+				s64 savedquit = quit_state, savedqprop = quit_propagate;
 				agent_input_blocked = 0;
 				agent_tool = 1;
 				agent_capture = out;
@@ -1105,20 +1105,20 @@ static void agent_run(const char *input)
 				err = ex_exec(command->valuestring);
 				agent_tool_calls++;
 				agent_sequence();
-				if (xgr == 2 && agent_capture_total > 4096) {
+				if (opt_agent_guardrails == 2 && agent_capture_total > 4096) {
 					char msg[128];
 					snprintf(msg, sizeof(msg),
 						"output guardrail: %zu > 4096 (gr 0 to bypass once)",
 						agent_capture_total);
 					sbuf_cut(out, 0)
 					sbufn_str(out, msg)
-				} else if (xgr >= 0 && xgr < 2)
-					xgr++;
+				} else if (opt_agent_guardrails >= 0 && opt_agent_guardrails < 2)
+					opt_agent_guardrails++;
 				agent_capture = NULL;
 				agent_tool = 0;
 				if (agent_input_blocked) {
-					xquit = savedquit;
-					xqprop = savedqprop;
+					quit_state = savedquit;
+					quit_propagate = savedqprop;
 					agent_input_blocked = 0;
 					err = "interactive input unavailable during agent execution";
 				}
@@ -1166,7 +1166,7 @@ static void agent_run(const char *input)
 			agent_redraw(NULL);
 			agent_pause = 0;
 			if (serial != agent_serial ||
-					epoch != agent_epoch || xquit)
+					epoch != agent_epoch || quit_state)
 				return;
 			agent_refresh();
 		}
@@ -1223,7 +1223,7 @@ static void *ec_ast(char *loc, char *cmd, char *arg)
 	cJSON *m;
 	ex_print("agent status", msg_ft)
 	snprintf(msg, sizeof(msg), "autocompact %s, %ld input tokens (%s)",
-		xaco ? "on" : "off", xaco, xaco_browse ? "aco! browse" : "aco loaded log");
+		opt_autocompact_tokens ? "on" : "off", opt_autocompact_tokens, opt_autocompact_browse ? "aco! browse" : "aco loaded log");
 	ex_print(msg, msg_ft)
 	if (!agent_ready) {
 		ex_print(agent_init_error ? agent_init_error :
@@ -1295,7 +1295,7 @@ static void *ec_ast(char *loc, char *cmd, char *arg)
 		agent_capture ? (long)agent_capture->s_n : 0);
 	ex_print(msg, msg_ft)
 	snprintf(msg, sizeof(msg), "limits     %ld rounds max, %ld sec timeout, guardrail %ld",
-		max_tool_rounds, request_timeout, xgr);
+		max_tool_rounds, request_timeout, opt_agent_guardrails);
 	ex_print(msg, msg_ft)
 	snprintf(msg, sizeof(msg), "session    %s", tempbufs[3].path);
 	ex_print(msg, msg_ft)
@@ -1305,7 +1305,7 @@ static void *ec_ast(char *loc, char *cmd, char *arg)
 static void *agent_session(char *loc, char *cmd, char *arg, s64 compact)
 {
 	char *scope = NULL;
-	s64 key, prefix = 2, savedvis = xvis, term_owned = !term_sbuf;
+	s64 key, prefix = 2, savedvis = opt_startup_flags, term_owned = !term_sbuf;
 	cJSON *config;
 	unsigned long epoch;
 	if (strchr(cmd, '!'))
@@ -1334,8 +1334,8 @@ static void *agent_session(char *loc, char *cmd, char *arg, s64 compact)
 				ex_print("agent reset write failed; "
 					"buffer cleared", msg_ft)
 			tempbufs[3].row = tempbufs[3].off = tempbufs[3].top = 0;
-			if (ex_buf == tempbufs+3) {
-				exbuf_load(ex_buf)
+			if (cur_buf == tempbufs+3) {
+				exbuf_load(cur_buf)
 			}
 		}
 		agent_history(cmd[1] == '~');
@@ -1346,11 +1346,11 @@ static void *agent_session(char *loc, char *cmd, char *arg, s64 compact)
 		term_init();
 	if (!(savedvis & 2))
 		agent_output("\n");
-	xvis = 3;
-	preserve(s64, xesc, xesc = 0;)
-	preserve(s64, xsep, xsep = 0;)
-	preserve(s64, xexp, xexp = 0;)
-	preserve(s64, xexe, xexe = 0;)
+	opt_startup_flags = 3;
+	preserve(s64, ex_escape, ex_escape = 0;)
+	preserve(s64, ex_separator, ex_separator = 0;)
+	preserve(s64, ex_expand_char, ex_expand_char = 0;)
+	preserve(s64, ex_shell_char, ex_shell_char = 0;)
 	sbuf_smake(draft, 128)
 	sbuf_smake(line, 128)
 	sbuf_str(line, "> ")
@@ -1358,12 +1358,12 @@ static void *agent_session(char *loc, char *cmd, char *arg, s64 compact)
 	ins_init(is)
 	if (*arg)
 		term_push(arg, strlen(arg));
-	while (!xquit && epoch == agent_epoch) {
+	while (!quit_state && epoch == agent_epoch) {
 		preserve(s64, ftidx,)
-		preserve(s64, xvis, xvis = (xvis | 2) & ~1;)
+		preserve(s64, opt_startup_flags, opt_startup_flags = (opt_startup_flags | 2) & ~1;)
 		syn_setft(_ft);
-		key = led_prompt(line, NULL, &xkmap, &is, prefix, 2|LED_AGENT);
-		restore(xvis)
+		key = led_prompt(line, NULL, &cur_keymap, &is, prefix, 2|LED_AGENT);
+		restore(opt_startup_flags)
 		restore(ftidx)
 		if (key == TK_CTL('c') || !key)
 			break;
@@ -1412,12 +1412,12 @@ static void *agent_session(char *loc, char *cmd, char *arg, s64 compact)
 	free(scope);
 	free(draft->s);
 	free(line->s);
-	restore(xexe)
-	restore(xexp)
-	restore(xsep)
-	restore(xesc)
+	restore(ex_shell_char)
+	restore(ex_expand_char)
+	restore(ex_separator)
+	restore(ex_escape)
 	restore(agent_logbuf)
-	xvis = savedvis;
+	opt_startup_flags = savedvis;
 	if (term_owned)
 		term_done();
 	syn_setft(xb_ft);
@@ -1466,8 +1466,8 @@ static void *ec_compact(char *loc, char *cmd, char *arg)
 	unsigned long epoch = agent_epoch;
 	char *task = agent_compact_task(browse, arg, 0);
 	/* Indices survive buffer-array growth during tool calls. */
-	s64 savedtemp = istempbuf(ex_buf);
-	s64 savedbuf = savedtemp ? ex_buf - tempbufs : ex_buf - bufs;
+	s64 savedtemp = istempbuf(cur_buf);
+	s64 savedbuf = savedtemp ? cur_buf - tempbufs : cur_buf - bufs;
 	char *original = agent_text(tempbufs[3].lb);
 	char *archive = agent_rotate_log();
 	if (!archive) {
@@ -1523,7 +1523,7 @@ static void *ec_compact(char *loc, char *cmd, char *arg)
 	}
 	if (savedtemp)
 		temp_switch(savedbuf, 0);
-	else if (savedbuf < xbufcur) {
+	else if (savedbuf < buf_count) {
 		bufs_switchwft(savedbuf)
 	}
 	free(archive);
@@ -1542,11 +1542,11 @@ static s64 agent_autocompact(const char *input)
 	struct agent_usage usage = agent_usage;
 	unsigned long epoch = agent_epoch, serial = agent_serial;
 	unsigned long rounds = agent_rounds;
-	s64 logbuf = agent_logbuf, browse = xaco_browse;
+	s64 logbuf = agent_logbuf, browse = opt_autocompact_browse;
 	/* Store indices rather than pointers: a tool can grow the buffer array. */
-	s64 savedtemp = istempbuf(ex_buf);
-	s64 savedbuf = savedtemp ? ex_buf - tempbufs : ex_buf - bufs;
-	exbuf_save(ex_buf)
+	s64 savedtemp = istempbuf(cur_buf);
+	s64 savedbuf = savedtemp ? cur_buf - tempbufs : cur_buf - bufs;
+	exbuf_save(cur_buf)
 	char *original = agent_text(lb);
 	char *task = agent_compact_task(browse, "", 1);
 	char *archive = agent_rotate_log();
@@ -1582,7 +1582,7 @@ static s64 agent_autocompact(const char *input)
 	char *text = summary;
 	while (isspace((unsigned char)*text))
 		text++;
-	if (agent_pack_done && !agent_cancel && !agent_pause && !xquit &&
+	if (agent_pack_done && !agent_cancel && !agent_pause && !quit_state &&
 			*text && strcmp(original, summary) &&
 			strlen(summary) < strlen(original) && !agent_save(3)) {
 		agent_history(1);
@@ -1617,7 +1617,7 @@ static s64 agent_autocompact(const char *input)
 		agent_save(3);
 	if (savedtemp)
 		temp_switch(savedbuf, 0);
-	else if (savedbuf < xbufcur) {
+	else if (savedbuf < buf_count) {
 		bufs_switchwft(savedbuf)
 	}
 	agent_rounds = rounds;

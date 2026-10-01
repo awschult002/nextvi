@@ -1,0 +1,10 @@
+PROJECT_NAME     = nextvi
+INPUT            = . docs/DOXYGEN.md
+FILE_PATTERNS    = *.c *.h *.md
+OPTIMIZE_OUTPUT_FOR_C = YES
+EXTRACT_ALL      = YES
+EXTRACT_STATIC   = YES
+SOURCE_BROWSER   = YES
+GENERATE_LATEX   = NO
+OUTPUT_DIRECTORY = docs/api
+QUIET            = YES

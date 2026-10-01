@@ -1,14 +1,36 @@
-static struct termios termios;
-struct pollfd term_ufd = {STDIN_FILENO, POLLIN};
-sbuf *term_sbuf;
-s64 term_record;
-s64 term_winch;
-s64 term_resized;
-s64 xrows, xcols;
-u64 tibuf_pos, tibuf_cnt, tibuf_sz = 128, ticmd_pos;
-unsigned char *tibuf, ticmd[4096];
-u64 texec, texec_n;
+/**
+ * @file term.c
+ * @brief Terminal layer: raw mode and window size, buffered output and
+ * escape sequences, the input queue (keys pushed by macros, mappings and
+ * term_exec are read before the terminal), and running shell commands
+ * through pipes.
+ */
+static struct termios termios;	///< original terminal attributes, restored by term_done()
+struct pollfd term_ufd = {STDIN_FILENO, POLLIN};	///< input (stdin) descriptor for poll()
+sbuf *term_sbuf;	///< output buffer; NULL before the first term_init() and after term_done()
+s64 term_record;	///< if set, output goes to term_sbuf until term_commit()
+s64 term_winch;	///< SIGWINCH count; reset by term_init()
+s64 term_resized;	///< incremented by every term_init(); vi.c compares it to vi_status to take the status row out of term_rows again
+s64 term_rows, term_cols;	///< terminal size in rows/columns: TIOCGWINSZ, else $LINES/$COLUMNS, default 25x80 (vi.c subtracts the status row from term_rows)
+/* term_inbuf_pos: index of the next byte to read from term_inbuf;
+ * term_inbuf_count: number of valid bytes in term_inbuf;
+ * term_inbuf_size: allocated size of term_inbuf (term_push() resizes it);
+ * term_cmd_keys_pos: number of bytes in term_cmd_keys. */
+u64 term_inbuf_pos, term_inbuf_count, term_inbuf_size = 128, term_cmd_keys_pos;
+/* term_inbuf: pending input queue (pushed keys, or the last byte read from the
+ *        terminal); term_read() returns from it first.
+ * term_cmd_keys: every byte returned by term_read() since vi.c last reset
+ *        term_cmd_keys_pos (once per normal-mode command); saved for '.' repeat. */
+unsigned char *term_inbuf, term_cmd_keys[4096];
+/* term_exec_type: type of the running term_exec() ('@' macro or '&' ex), 0 if none;
+ *        when its input runs out, term_read() sets quit_state to leave the
+ *        nested vi() ('&' also returns 0 instead of reading the terminal).
+ * term_exec_pushed: bytes term_push() inserted at the read position during
+ *        term_exec(); later pushes go after them, so they are read in push
+ *        order before the rest of the queue. */
+u64 term_exec_type, term_exec_pushed;
 
+/** @brief Enter raw mode (no ICANON, ISIG, ECHO) and read the terminal size. */
 void term_init(void)
 {
 	struct winsize win;
@@ -22,18 +44,19 @@ void term_init(void)
 	newtermios.c_lflag &= ~(ICANON | ISIG | ECHO);
 	tcsetattr(term_ufd.fd, TCSAFLUSH, &newtermios);
 	if (!ioctl(term_ufd.fd, TIOCGWINSZ, &win)) {
-		xcols = win.ws_col;
-		xrows = win.ws_row;
+		term_cols = win.ws_col;
+		term_rows = win.ws_row;
 	} else {
 		if ((s = getenv("LINES")))
-			xrows = atoi(s);
+			term_rows = atoi(s);
 		if ((s = getenv("COLUMNS")))
-			xcols = atoi(s);
+			term_cols = atoi(s);
 	}
-	xcols = xcols ? xcols : 80;
-	xrows = xrows ? xrows : 25;
+	term_cols = term_cols ? term_cols : 80;
+	term_rows = term_rows ? term_rows : 25;
 }
 
+/** @brief Flush output, free term_sbuf and restore the terminal attributes. */
 void term_done(void)
 {
 	if (!term_sbuf)
@@ -44,23 +67,26 @@ void term_done(void)
 	tcsetattr(term_ufd.fd, 0, &termios);
 }
 
+/** @brief Clear the screen and home the cursor. */
 void term_clean(void)
 {
 	term_write("\x1b[2J", 4)	/* clear screen */
 	term_write("\x1b[H", 3)		/* cursor topleft */
 }
 
+/** @brief Restore the terminal and stop the process (^z); reinit on resume. */
 void term_suspend(void)
 {
-	if (xvis & 8)
+	if (opt_startup_flags & 8)
 		term_scrl()
 	term_done();
 	kill(0, SIGSTOP);
 	term_init();
-	if (xvis & 8)
+	if (opt_startup_flags & 8)
 		term_scrh()
 }
 
+/** @brief Write out term_sbuf and stop recording. */
 void term_commit(void)
 {
 	term_write(term_sbuf->s, term_sbuf->s_n)
@@ -68,6 +94,7 @@ void term_commit(void)
 	term_record = 0;
 }
 
+/** @brief Output s, buffered if term_record. */
 static void term_out(char *s)
 {
 	if (term_record)
@@ -76,17 +103,20 @@ static void term_out(char *s)
 		term_write(s, strlen(s))
 }
 
+/** @brief Output one byte. */
 void term_chr(s64 ch)
 {
 	char s[4] = {ch};
 	term_out(s);
 }
 
+/** @brief Clear to the end of the line. */
 void term_kill(void)
 {
 	term_out("\33[K");
 }
 
+/** @brief Insert n lines at the cursor row (n > 0) or delete -n lines (n < 0). */
 void term_room(s64 n)
 {
 	char cmd[64] = "\33[";
@@ -98,6 +128,10 @@ void term_room(s64 n)
 	term_out(cmd);
 }
 
+/**
+ * @brief Move the cursor to row r, column c (0-based).
+ * If r < 0, move to column c of the current row (CR then c right).
+ */
 void term_pos(s64 r, s64 c)
 {
 	char buf[64] = "\r\33[", *s;
@@ -115,49 +149,66 @@ void term_pos(s64 r, s64 c)
 	}
 }
 
-/* read s before reading from the terminal */
+/**
+ * @brief Queue n bytes of s to be read before reading from the terminal.
+ * Appended to the queue normally; inside term_exec() inserted at the read
+ * position (after earlier pushes of the same position, see term_exec_pushed).
+ */
 void term_push(char *s, u64 n)
 {
-	static u64 tibuf_prev;
-	if (tibuf_cnt + n >= tibuf_sz || tibuf_sz - (tibuf_cnt + n) > 128) {
-		tibuf_sz = tibuf_cnt + n + 128;
-		tibuf = erealloc(tibuf, tibuf_sz);
+	static u64 term_inbuf_prev;	///< term_inbuf_pos at the previous push during term_exec(); if it moved, term_exec_pushed restarts
+	/* grow if full, shrink if more than 128 bytes would be spare */
+	if (term_inbuf_count + n >= term_inbuf_size || term_inbuf_size - (term_inbuf_count + n) > 128) {
+		term_inbuf_size = term_inbuf_count + n + 128;
+		term_inbuf = erealloc(term_inbuf, term_inbuf_size);
 	}
-	if (texec) {
-		if (texec == '@' && xquit > 0) {
-			xquit = 0;
-			texec_n = 0;
-		} else if (tibuf_prev != tibuf_pos)
-			texec_n = 0;
-		memmove(tibuf + tibuf_pos + n + texec_n,
-			tibuf + tibuf_pos + texec_n,
-			tibuf_cnt - tibuf_pos - texec_n);
-		memcpy(tibuf + tibuf_pos + texec_n, s, n);
-		texec_n += n;
-		tibuf_prev = tibuf_pos;
+	if (term_exec_type) {
+		if (term_exec_type == '@' && quit_state > 0) {
+			quit_state = 0;
+			term_exec_pushed = 0;
+		} else if (term_inbuf_prev != term_inbuf_pos)
+			term_exec_pushed = 0;
+		/* open an n byte gap after the term_exec_pushed bytes already pushed here */
+		memmove(term_inbuf + term_inbuf_pos + n + term_exec_pushed,
+			term_inbuf + term_inbuf_pos + term_exec_pushed,
+			term_inbuf_count - term_inbuf_pos - term_exec_pushed);
+		memcpy(term_inbuf + term_inbuf_pos + term_exec_pushed, s, n);
+		term_exec_pushed += n;
+		term_inbuf_prev = term_inbuf_pos;
 	} else
-		memcpy(tibuf + tibuf_cnt, s, n);
-	tibuf_cnt += n;
+		memcpy(term_inbuf + term_inbuf_count, s, n);
+	term_inbuf_count += n;
 }
 
+/**
+ * @brief Return the next input byte: from term_inbuf, else from the terminal.
+ * @param winch  if nonzero, returned as the key when the window was resized
+ * @return the byte, or 0 on EOF/error (or when a '&' term_exec runs out, or
+ *         when LSP diagnostics changed while lsp_wake is set, so vi redraws)
+ * While waiting, LSP server fds are serviced too (lsp_process_fd()). During
+ * agent tool execution no input is read: ^c is returned and quit_state set.
+ * Terminal bytes are also appended to register opt_record_reg if set; every
+ * returned byte is logged in term_cmd_keys. Before returning it waits for the
+ * frame queued for the paint thread (vi_rendwait()).
+ */
 s64 term_read(s64 winch)
 {
 	static struct pollfd ufd[1 + LSP_NFDS_MAX];
 	s64 cw, i, nfds;
-	if (tibuf_pos >= tibuf_cnt) {
-		if (texec) {
-			xquit = !xquit ? 1 : xquit;
-			if (texec == '&')
+	if (term_inbuf_pos >= term_inbuf_count) {
+		if (term_exec_type) {
+			quit_state = !quit_state ? 1 : quit_state;
+			if (term_exec_type == '&')
 				goto err;
 		}
 		if (agent_tool) {
 			agent_input_blocked = 1;
-			xquit = !xquit ? 1 : xquit;
-			*tibuf = TK_CTL('c');
+			quit_state = !quit_state ? 1 : quit_state;
+			*term_inbuf = TK_CTL('c');
 			goto ret;
 		}
 		if (term_winch && winch) {
-			*tibuf = winch;	/* yield until term_winch is cleared */
+			*term_inbuf = winch;	/* yield until term_winch is cleared */
 			goto ret;
 		}
 		cw = 0;
@@ -170,7 +221,7 @@ s64 term_read(s64 winch)
 			ufd[i+1].events = POLLIN;
 		}
 		/* read a single input character, servicing lsp fds */
-		if (xquit >= 0 && poll(ufd, 1 + nfds, -1) > 0) {
+		if (quit_state >= 0 && poll(ufd, 1 + nfds, -1) > 0) {
 			/* POLLHUP too: a server that died must be reaped here,
 			 * else its fd stays in the set and poll() never blocks */
 			for (i = 0; i < nfds; i++)
@@ -180,43 +231,43 @@ s64 term_read(s64 winch)
 			 * fails and the usual end of input handling takes over */
 			if (!(ufd[0].revents & (POLLIN | POLLHUP | POLLERR))) {
 				if (term_winch && winch) {
-					*tibuf = winch;
+					*term_inbuf = winch;
 					goto ret;
 				}
 				if (lsp_dirty && lsp_wake)
 					goto err;	/* yield so vi redraws diagnostics */
 				goto re;
 			}
-			if (read(term_ufd.fd, tibuf, 1) > 0) {
-				if (xrr > 0) {
+			if (read(term_ufd.fd, term_inbuf, 1) > 0) {
+				if (opt_record_reg > 0) {
 					static char buf[2];
-					buf[0] = *tibuf;
-					ex_regput(xrr, buf, 1);
+					buf[0] = *term_inbuf;
+					ex_regput(opt_record_reg, buf, 1);
 				}
 				goto ret;
 			}
 		}
-		xquit = !isatty(term_ufd.fd) ? -1 : xquit;
-		if (term_winch && winch && xquit >= 0) {
-			*tibuf = winch;
+		quit_state = !isatty(term_ufd.fd) ? -1 : quit_state;
+		if (term_winch && winch && quit_state >= 0) {
+			*term_inbuf = winch;
 			goto ret;
-		} else if (term_winch != cw && !winch && xquit >= 0) {
+		} else if (term_winch != cw && !winch && quit_state >= 0) {
 			cw = term_winch;
 			goto re;
 		}
 		err:
-		*tibuf = 0;
+		*term_inbuf = 0;
 		ret:
-		tibuf_cnt = 1;
-		tibuf_pos = 0;
+		term_inbuf_count = 1;
+		term_inbuf_pos = 0;
 	}
 	vi_rendwait();		/* the queued frame overlaps the read above */
-	if (ticmd_pos < sizeof(ticmd))
-		ticmd[ticmd_pos++] = tibuf[tibuf_pos];
-	return tibuf[tibuf_pos++];
+	if (term_cmd_keys_pos < sizeof(term_cmd_keys))
+		term_cmd_keys[term_cmd_keys_pos++] = term_inbuf[term_inbuf_pos];
+	return term_inbuf[term_inbuf_pos++];
 }
 
-/* return a static string that changes text attributes to att */
+/** @brief Return a static SGR escape string that sets text attributes att. */
 char *term_att(s64 att)
 {
 	if (att & SYN_MK)
@@ -250,6 +301,11 @@ char *term_att(s64 att)
 	return buf;
 }
 
+/**
+ * @brief Fork and exec argv; if ifd/ofd, connect its stdin/stdout+stderr to
+ * pipes and return our ends in them.
+ * @return child pid or -1
+ */
 static s64 cmd_make(char **argv, s64 *ifd, s64 *ofd)
 {
 	s64 pid;
@@ -292,6 +348,10 @@ static s64 cmd_make(char **argv, s64 *ifd, s64 *ofd)
 	return pid;
 }
 
+/**
+ * @brief Return the first usable entry of the NULL-terminated list q: "$VAR"
+ * entries are looked up in the environment, others are returned as is.
+ */
 char *xgetenv(char **q)
 {
 	char *r = NULL;
@@ -305,7 +365,17 @@ char *xgetenv(char **q)
 	return r;
 }
 
-/* execute a command; pass in input if ibuf and process output if oproc */
+/**
+ * @brief Run cmd with $SHELL -c (or sh); pass in input if ibuf and process output if oproc.
+ * During agent tool execution the call is handed to agent_shell() instead.
+ * @param cmd     command line passed to the shell
+ * @param ibuf    written to the command's stdin; while it runs ^c on the
+ *                terminal sends SIGINT. If NULL the command gets the
+ *                terminal (term_done() before, term_init() after).
+ * @param oproc   1: collect stdout+stderr; 2: also echo it to the terminal
+ * @param status  if not NULL, receives the waitpid() status
+ * @return the collected output (empty if !oproc), NULL if fork fails
+ */
 sbuf *cmd_pipe(char *cmd, sbuf *ibuf, s64 oproc, s64 *status)
 {
 	s64 terminal = !ibuf && term_sbuf;
@@ -318,11 +388,11 @@ sbuf *cmd_pipe(char *cmd, sbuf *ibuf, s64 oproc, s64 *status)
 	s64 nw = 0;
 	char *argv[5];
 	argv[0] = xgetenv(sh);
-	argv[1] = xish ? "-i" : argv[0];
+	argv[1] = opt_interactive_shell ? "-i" : argv[0];
 	argv[2] = "-c";
 	argv[3] = cmd;
 	argv[4] = NULL;
-	s64 pid = cmd_make(argv+!xish, ibuf ? &ifd : NULL, oproc ? &ofd : NULL);
+	s64 pid = cmd_make(argv+!opt_interactive_shell, ibuf ? &ifd : NULL, oproc ? &ofd : NULL);
 	if (pid <= 0)
 		return NULL;
 	sbuf *sb;

@@ -1,0 +1,4 @@
+vi_lnnum	lnum_mode
+vi_lncol	lnum_width
+vi_rshift	hint_row_shift
+lnnum	lnum_cur

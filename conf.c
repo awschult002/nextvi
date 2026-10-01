@@ -1,3 +1,14 @@
+/**
+ * @file conf.c
+ * @brief Compile-time configuration: filetypes, syntax highlight patterns,
+ * bidi direction rules, placeholders for unprintable characters, and
+ * lookups into the keymap/digraph tables of kmap.h. Edit and rebuild.
+ * Also: the agent's connection settings and extra :exspec lines (agent),
+ * the speller command and per-filetype speller arguments (:sl), and the
+ * search match colours (conf_hl_match, conf_hl_match_cursor).
+ *
+ * Filetype names are compared by pointer, not by string (see syn_setft()).
+ */
 #include "kmap.h"
 
 /* Embedded subzeroclaw configuration. NULL log_dir uses $HOME/.nextvi/logs. */
@@ -18,10 +29,10 @@ static s64 request_timeout = 500;
 #endif
 
 static s64 max_tool_rounds = 300;
-s64 xgr = 2;	/* agent guardrails: anything but 2 = disabled */
-s64 xar;	/* display returned agent reasoning (:ar) */
-s64 xaco;	/* autocompact input-token threshold; 0 disables */
-static s64 xaco_browse;	/* last selected mode: aco! rather than aco */
+s64 opt_agent_guardrails = 2;	/* agent guardrails: anything but 2 = disabled (was xgr) */
+s64 opt_agent_reasoning;	/* display returned agent reasoning (:ar) (was xar) */
+s64 opt_autocompact_tokens;	/* autocompact input-token threshold; 0 disables (was xaco) */
+static s64 opt_autocompact_browse;	/* last selected mode: aco! rather than aco (was xaco_browse) */
 
 static char exspec_insert[] =
 	"Ex special characters are disabled and raw ex mode is on by default.\n"
@@ -47,30 +58,34 @@ static struct {
 	{"expansion", "Ex special characters disabled by default. Expansion unavailable."},
 };
 
-/* access mode of new files */
+/** Access mode of new files (open() with O_CREAT in ex.c). */
 const s64 conf_mode = 0600;
 
 /* the speller of the sl command, must speak the ispell pipe protocol */
 char spell_cmd[] = "aspell -a";
 
+/* FTGEN(x) defines the filetype name string x_ft = "x"; FT(x) refers to it */
 #define FTGEN(ft) static char ft##_ft[] = #ft;
 #define FT(ft) ft##_ft
 FTGEN(c) FTGEN(roff) FTGEN(tex) FTGEN(mbox)
 FTGEN(mk) FTGEN(sh) FTGEN(py) FTGEN(js)
 FTGEN(html) FTGEN(diff) FTGEN(go) FTGEN(md)
 
-char _ft[] = "/";	/* default hl */
-char fm_ft[] = "/fm";	/* file manager */
-char n_ft[] = "/#";	/* numbers highlight for ^v */
-char nn_ft[] = "/##";	/* numbers highlight for # */
-char ac_ft[] = "/ac";	/* autocomplete dropdown */
-char ex_ft[] = "/ex";	/* ex mode (is never '\n' terminated) */
-char vs_ft[] = "/vs";	/* vi search prompt (is never '\n' terminated) */
-char bar_ft[] = "/-";	/* status bar (is never '\n' terminated) */
-char fuzz_ft[] = "/f";	/* fuzzy search prompt (is never '\n' terminated) */
-char msg_ft[] = "/>";	/* ex message (is never '\n' terminated) */
-char lsp_ft[] = "/lsp";	/* lsp diagnostic virtual text */
+/* Internal filetypes for the editor's own prompts and views */
+char _ft[] = "/";	///< default hl
+char fm_ft[] = "/fm";	///< file manager
+char n_ft[] = "/#";	///< numbers highlight for ^v
+char nn_ft[] = "/##";	///< numbers highlight for #
+char ac_ft[] = "/ac";	///< autocomplete dropdown
+char ex_ft[] = "/ex";	///< ex mode (is never '\n' terminated)
+char vs_ft[] = "/vs";	///< vi search prompt (is never '\n' terminated)
+char bar_ft[] = "/-";	///< status bar (is never '\n' terminated)
+char fuzz_ft[] = "/f";	///< fuzzy search prompt (is never '\n' terminated)
+char msg_ft[] = "/>";	///< ex message (is never '\n' terminated)
+char lsp_ft[] = "/lsp";	///< lsp diagnostic virtual text
 
+/** Filetypes chosen by file name pattern; the {ft, NULL} entries only
+ * register the internal filetypes. */
 struct filetype fts[] = {
 	{FT(c), "\\.(c|h|cpp|hpp|cc|cs)$"},			/* C */
 	{FT(roff), "\\.(ms|tr|roff|tmac|txt|[1-9])$"},		/* troff */
@@ -96,7 +111,7 @@ struct filetype fts[] = {
 	{msg_ft, NULL},
 	{lsp_ft, NULL}
 };
-const s64 ftslen = LEN(fts);
+const s64 ftslen = LEN(fts);	///< number of entries in fts[]
 
 /* aspell's context filter, checking only "#" comments; the stock comment
  * mode is the inverse, it hides comments and checks the code */
@@ -121,6 +136,7 @@ struct spellft spell_fts[] = {
 };
 const s64 spell_ftslen = LEN(spell_fts);
 
+/* Color numbers for the attributes in hls[] (see SYN_* in vi.h) */
 #define NA	0	/* no attribute */
 #define RE	1	/* red */
 #define GR	2	/* green */
@@ -138,6 +154,7 @@ const s64 spell_ftslen = LEN(spell_fts);
 #define CY1	14	/* bright cyan */
 #define WH1	15	/* bright white */
 
+/* A(...): compound literal for a struct highlight att array */
 #define A(...) (s64 []){__VA_ARGS__}
 /* att of the misspelled words, used by sl; set 9 is theirs alone, an earlier
  * filetype rule on the line, a comment or a heading, never swallows them */
@@ -145,6 +162,13 @@ const s64 spell_ftslen = LEN(spell_fts);
 
 /* At least 1 entry is required in this struct for fallback */
 /* lbuf lines are *always "\n\0" terminated, for $ to work one needs to account for '\n' too */
+/**
+ * Highlight patterns. Consecutive entries with the same ft and set are
+ * compiled into one rset (see syn_initft()). Entries with pat NULL and an
+ * id are slots filled at run time by syn_addhl(): id 1 word/fuzzy search
+ * (hlw), 2 current line (hll), 3 matching pair (hlp), 5 misspelled words
+ * (:sl, the {ft, NULL, SP, 9, 5} entries).
+ */
 struct highlight hls[] = {
 	{_ft, NULL, A(CY1 | SYN_BD), 1, 2},  /* <-- optional, used by hll if set */
 	{_ft, NULL, A(RE1 | SYN_BGMK(GR1)), 0, 3}, /* <-- optional, used by hlp if set */
@@ -420,51 +444,57 @@ return|select|switch|type|var))\\>", A(GR1, BL1 | SYN_BD, YE1)},
 	{lsp_ft, "^.*warning.*$", A(YE1 | SYN_IT)},
 	{lsp_ft, "^.*$", A(BL1 | SYN_IT)},
 };
-const s64 hlslen = LEN(hls);
+const s64 hlslen = LEN(hls);	///< number of entries in hls[]
 
-/* ids of optional hls, reset and reloaded on filetype change */
+/** Ids of optional hls, reset and reloaded on filetype change. */
 const s64 hlopts[] = {1, 2, 5};
-const s64 hloptslen = LEN(hlopts);
+const s64 hloptslen = LEN(hlopts);	///< number of entries in hlopts[]
 
-/* how to highlight text in the reverse direction */
+/** Attribute merged into adjacent characters shown in reverse order (see ex.c). */
 const s64 conf_hlrev = SYN_BGMK(8);
 
 /* how to highlight the search matches */
-const s64 conf_hlmat = RE1;
+const s64 conf_hl_match = RE1;
 
 /* how to highlight the search match the cursor lands on */
-const s64 conf_hlmatc = RE1 | SYN_BGMK(8);
+const s64 conf_hl_match_cursor = RE1 | SYN_BGMK(8);
 
 /* right-to-left characters */
 #define CR2L		"ء-يپچژکگی‌-‍؛،»«؟ً-ْٔ"
 /* neutral characters */
 #define CNEUT		"\x1- !-/:-@[-`{-\x7f"
 
+/** Line direction context: the first match decides it (-1 RTL, +1 LTR). */
 struct dircontext dctxs[] = {
 	{"^[" CR2L "]", -1},
 	{"^[a-zA-Z_0-9]", +1},
 };
-const s64 dctxlen = LEN(dctxs);
+const s64 dctxlen = LEN(dctxs);	///< number of entries in dctxs[]
 
+/** Direction marks: text matched by a pattern (or its groups, per dir[])
+ * is laid out in that direction; ctx limits the context it applies in. */
 struct dirmark dmarks[] = {
 	{"[" CR2L "][" CNEUT CR2L "]*[" CR2L "]", +1, {-1}},
 	{"^([ \t]+)?([" CNEUT "]*[^" CR2L "]*[^" CR2L CNEUT "](?:[" CNEUT "]+$)?)", -1, {0, 1, -1}},
 	{"[^" CR2L CNEUT "][^" CR2L "]*[^" CR2L CNEUT "](?:[" CNEUT "]+$)?", -1, {-1}},
 };
-const s64 dmarkslen = LEN(dmarks);
+const s64 dmarkslen = LEN(dmarks);	///< number of entries in dmarks[]
 
+/** Default placeholders: control chars shown as "^", ZWNJ/ZWJ as "-". */
 struct placeholder _ph[2] = {
 	{{0x0,0x1f}, "^", 1, 1},
 	{{0x200c,0x200d}, "-", 1, 3},
 };
-struct placeholder *ph = _ph;
-s64 phlen = LEN(_ph);
+struct placeholder *ph = _ph;	///< active placeholder list: _ph, or a malloc'd list built by `:ph`
+s64 phlen = LEN(_ph);	///< number of entries in ph
 
+/** @brief The keymap table kmaps[id] (entry 0 is its name). */
 char **conf_kmap(s64 id)
 {
 	return kmaps[id];
 }
 
+/** @brief Index of the keymap called name in kmaps[], 0 if not found. */
 s64 conf_kmapfind(char *name)
 {
 	for (s64 i = 0; i < LEN(kmaps); i++)
@@ -473,6 +503,7 @@ s64 conf_kmapfind(char *name)
 	return 0;
 }
 
+/** @brief The character for digraph c1 c2, NULL if none. */
 char *conf_digraph(s64 c1, s64 c2)
 {
 	for (s64 i = 0; i < LEN(digraphs); i++)
