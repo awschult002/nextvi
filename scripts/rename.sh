@@ -1,6 +1,6 @@
 #!/bin/sh
 # Replay a whole-word rename table (old<TAB>new per line) over the C sources.
-# Usage: scripts/rename.sh scripts/renames-globals.tsv   (then -term, -vi-lnum)
+# Usage: scripts/rename.sh scripts/renames-globals.tsv   (then -term, -vi-lnum, -patches)
 #
 # nextvi is a unity build (vi.c #includes every .c), so renames and collision
 # checks always cover every *.c and *.h in the tree.
@@ -59,5 +59,5 @@ while IFS='	' read -r old new; do
 done < "$todo"
 echo "renamed $(wc -l < "$todo") names"
 
-# Report vi.h globals that no table maps (e.g. new upstream globals). Informational only.
+# Report file-scope globals that no table maps (e.g. new upstream globals). Informational only.
 scripts/unmapped.sh || true
