@@ -175,12 +175,12 @@ void ts_free(struct ts_state *s)
 struct ts_state *ts_document(struct lbuf *lb)
 {
 	s64 language = -1;
-	if (xhl <= 1 || !lb)
+	if (opt_syntax_hl <= 1 || !lb)
 		return NULL;
 	for (s64 i = 0; i < LEN(ts_languages); i++)
 		if (syn_getft() == ts_languages[i].ft)
 			language = i;
-	const char *path = ex_buf && xb == lb ? xb_path : "";
+	const char *path = cur_buf && xb == lb ? xb_path : "";
 	const char *suffix = strrchr(path, '.');
 	if (*path && (!suffix || (strcmp(suffix, ".c") && strcmp(suffix, ".h"))))
 		language = -1;
@@ -225,7 +225,7 @@ static void ts_splice(struct ts_state *s, s64 row, s64 del, uint32_t *lengths, s
 void ts_edit(struct lbuf *lb, s64 row, s64 del, char **lines, s64 ins)
 {
 	lb->ts_revision++;
-	if (xhl > 1)
+	if (opt_syntax_hl > 1)
 		ts_redraw = 1;
 	if (!lb->ts)
 		return;
@@ -367,12 +367,12 @@ static void ts_setword(char *word)
 
 static void ts_cursor(led_ctx *x, struct ts_source *source)
 {
-	s64 row = source->state->preview ? source->state->cursor : xrow;
-	s64 hl = xhll && source->row == row ? syn_findhl(2) : -1;
+	s64 row = source->state->preview ? source->state->cursor : cursor_row;
+	s64 hl = opt_hl_line && source->row == row ? syn_findhl(2) : -1;
 	if (hl >= 0)
 		for (s64 i = 0; i < x->alen; i++)
 			x->att[i] = syn_merge(x->att[i], hls[hl].att[0]);
-	hl = xhlw && ts_word ? syn_findhl(1) : -1;
+	hl = opt_hl_word && ts_word ? syn_findhl(1) : -1;
 	if (hl < 0)
 		return;
 	uint32_t len;
@@ -399,7 +399,7 @@ static void ts_cursor(led_ctx *x, struct ts_source *source)
 
 static void ext_treesitter(led_ext *p, led_ctx *x)
 {
-	if (xhl <= 1)
+	if (opt_syntax_hl <= 1)
 		return;
 	struct ts_source *source = p->usr;
 	struct ts_state *s = source ? source->state : NULL;
@@ -435,7 +435,7 @@ static s64 ts_preview_row(s64 ps)
 
 static void led_preview_current(char *text, s64 ps, s64 lncol)
 {
-	led_srender(text, -1, lncol, xleft, xleft + xcols - lncol,
+	led_srender(text, -1, lncol, opt_left_col, opt_left_col + xcols - lncol,
 		ts_preview, ts_preview_row(ps), 0)
 }
 
@@ -461,9 +461,9 @@ static void led_preview_wrapped(s64 current)
 {
 	preserve(ren_state*, rstate, rstate = rstates + 1;)
 	s64 trow = led_row;
-	for (s64 row = xtop; row < current; row++)
+	for (s64 row = view_top_row; row < current; row++)
 		trow -= led_preview_height(row, 0, 0);
-	for (s64 row = xtop; trow < ts_winh; row++)
+	for (s64 row = view_top_row; trow < ts_winh; row++)
 		if (row == current)
 			trow = led_row + led_rowh;
 		else
@@ -479,7 +479,7 @@ static void led_preview_draw(s64 ps)
 		return;
 	}
 	preserve(ren_state*, rstate, rstate = rstates + 1;)
-	for (s64 row = xtop; row < xtop + xrows; row++) {
+	for (s64 row = view_top_row; row < view_top_row + xrows; row++) {
 		if (row == current)
 			continue;
 		char *line = ts_line(ts_preview, row);
@@ -489,15 +489,15 @@ static void led_preview_draw(s64 ps)
 			char *copy = emalloc(len + 4);
 			memcpy(copy, line, len);
 			memset(copy + len, 0, 4);
-			led_srender(copy, row - xtop, vi_lncol, xleft, xleft + xcols - vi_lncol,
+			led_srender(copy, row - view_top_row, vi_lncol, opt_left_col, opt_left_col + xcols - vi_lncol,
 				ts_preview, row, 0)
 			rstate->s = NULL;
 			free(copy);
 		} else
-			led_srender(line ? line : "~", row - xtop, vi_lncol, xleft,
-				xleft + xcols - vi_lncol, ts_preview, row, 0)
+			led_srender(line ? line : "~", row - view_top_row, vi_lncol, opt_left_col,
+				opt_left_col + xcols - vi_lncol, ts_preview, row, 0)
 	}
-	term_pos(current - xtop, vi_lncol);
+	term_pos(current - view_top_row, vi_lncol);
 	restore(rstate)
 }
 

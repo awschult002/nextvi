@@ -59,7 +59,7 @@ static void lsp_srv_reset(lsp_server *srv);
 static void lsp_open_ft(const char *ft)
 {
 	s64 i;
-	for (i = 0; i < xbufcur; i++)
+	for (i = 0; i < buf_count; i++)
 		if (bufs[i].ft && bufs[i].path && bufs[i].path[0] &&
 				!strcmp(bufs[i].ft, ft))
 			lsp_open_lb(bufs[i].path, bufs[i].ft, bufs[i].lb);
@@ -916,7 +916,7 @@ static void lsp_open_lb(const char *path, const char *ft, struct lbuf *lb)
 
 void lsp_open(const char *path, const char *ft)
 {
-	lsp_open_lb(path, ft, ex_buf ? ex_buf->lb : NULL);
+	lsp_open_lb(path, ft, cur_buf ? cur_buf->lb : NULL);
 }
 
 /* push buffer edits to the servers when the undo head changed (live diagnostics) */
@@ -949,7 +949,7 @@ void lsp_save(const char *path)
 	if (!path || !path[0])
 		return;
 	/* clangd lints its in-memory copy, so resync it before saving */
-	lsp_sync(path, ex_buf ? ex_buf->lb : NULL);
+	lsp_sync(path, cur_buf ? cur_buf->lb : NULL);
 	for (i = 0; i < lsp_nsrvs; i++) {
 		srv = &lsp_srvs[i];
 		if (srv->pid <= 0 || lsp_doc_find(srv, path) < 0)
@@ -976,7 +976,7 @@ static s64 lsp_byte_offset(struct lbuf *lb, s64 row, s64 off)
 static lsp_server *lsp_srv_resolve(const char *path)
 {
 	char buf[384];
-	char *ft = ex_buf ? ex_buf->ft : NULL;
+	char *ft = cur_buf ? cur_buf->ft : NULL;
 	lsp_server *srv;
 	if (!path || !path[0]) {
 		lsp_show_msg("lsp: buffer has no file name");
@@ -1001,7 +1001,7 @@ static lsp_server *lsp_srv_resolve(const char *path)
 	}
 	/* the file may predate the :lsp registration, or the server may have
 	 * been restarted since, which empties its document list */
-	lsp_open_lb(path, ft, ex_buf->lb);
+	lsp_open_lb(path, ft, cur_buf->lb);
 	if (lsp_srv_for_path(path))
 		return srv;
 	if (srv->broken)
@@ -1029,7 +1029,7 @@ static s64 lsp_request(const char *method, const char *path, s64 row, s64 off,
 	lsp_server *srv = lsp_srv_resolve(path);
 	if (!srv)
 		return -1;
-	col = lsp_byte_offset(ex_buf ? ex_buf->lb : NULL, row, off);
+	col = lsp_byte_offset(cur_buf ? cur_buf->lb : NULL, row, off);
 	sbuf_smake(sb, 256)
 	id = lsp_fmt_pos(srv, sb, method, path, row, col);
 	lsp_send_sb(srv, sb);
@@ -1144,18 +1144,18 @@ void lsp_definition(const char *path, s64 row, s64 off)
 	}
 	lsp_path_from_uri(uri, fpath, sizeof(fpath));
 	lsp_relpath(fpath);
-	/* the response is dead once another buffer is loaded into ex_buf */
+	/* the response is dead once another buffer is loaded into cur_buf */
 	if (strcmp(fpath, path) && !ex_edit(fpath, strlen(fpath))) {
-		ex_bufpostfix(ex_buf, 1);
+		ex_bufpostfix(cur_buf, 1);
 		syn_setft(xb_ft);
 		if (xb_path && *xb_path && xb_ft)
 			lsp_open(xb_path, xb_ft);
 	}
-	xrow = target_line < lbuf_len(xb) ? target_line : lbuf_len(xb) - 1;
-	if (xrow < 0)
-		xrow = 0;
-	xoff = 0;
-	xtop = xrow > xrows / 2 ? xrow - xrows / 2 : 0;
+	cursor_row = target_line < lbuf_len(xb) ? target_line : lbuf_len(xb) - 1;
+	if (cursor_row < 0)
+		cursor_row = 0;
+	cursor_off = 0;
+	view_top_row = cursor_row > xrows / 2 ? cursor_row - xrows / 2 : 0;
 }
 
 const char *lsp_diag_for_line(const char *path, s64 line, s64 *sev)

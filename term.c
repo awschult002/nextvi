@@ -52,12 +52,12 @@ void term_clean(void)
 
 void term_suspend(void)
 {
-	if (xvis & 8)
+	if (opt_startup_flags & 8)
 		term_scrl()
 	term_done();
 	kill(0, SIGSTOP);
 	term_init();
-	if (xvis & 8)
+	if (opt_startup_flags & 8)
 		term_scrh()
 }
 
@@ -124,8 +124,8 @@ void term_push(char *s, u64 n)
 		tibuf = erealloc(tibuf, tibuf_sz);
 	}
 	if (texec) {
-		if (texec == '@' && xquit > 0) {
-			xquit = 0;
+		if (texec == '@' && quit_state > 0) {
+			quit_state = 0;
 			texec_n = 0;
 		} else if (tibuf_prev != tibuf_pos)
 			texec_n = 0;
@@ -146,13 +146,13 @@ s64 term_read(s64 winch)
 	s64 cw, i, nfds;
 	if (tibuf_pos >= tibuf_cnt) {
 		if (texec) {
-			xquit = !xquit ? 1 : xquit;
+			quit_state = !quit_state ? 1 : quit_state;
 			if (texec == '&')
 				goto err;
 		}
 		if (agent_tool) {
 			agent_input_blocked = 1;
-			xquit = !xquit ? 1 : xquit;
+			quit_state = !quit_state ? 1 : quit_state;
 			*tibuf = TK_CTL('c');
 			goto ret;
 		}
@@ -170,7 +170,7 @@ s64 term_read(s64 winch)
 			ufd[i+1].events = POLLIN;
 		}
 		/* read a single input character, servicing lsp fds */
-		if (xquit >= 0 && poll(ufd, 1 + nfds, -1) > 0) {
+		if (quit_state >= 0 && poll(ufd, 1 + nfds, -1) > 0) {
 			/* POLLHUP too: a server that died must be reaped here,
 			 * else its fd stays in the set and poll() never blocks */
 			for (i = 0; i < nfds; i++)
@@ -188,19 +188,19 @@ s64 term_read(s64 winch)
 				goto re;
 			}
 			if (read(term_ufd.fd, tibuf, 1) > 0) {
-				if (xrr > 0) {
+				if (opt_record_reg > 0) {
 					static char buf[2];
 					buf[0] = *tibuf;
-					ex_regput(xrr, buf, 1);
+					ex_regput(opt_record_reg, buf, 1);
 				}
 				goto ret;
 			}
 		}
-		xquit = !isatty(term_ufd.fd) ? -1 : xquit;
-		if (term_winch && winch && xquit >= 0) {
+		quit_state = !isatty(term_ufd.fd) ? -1 : quit_state;
+		if (term_winch && winch && quit_state >= 0) {
 			*tibuf = winch;
 			goto ret;
-		} else if (term_winch != cw && !winch && xquit >= 0) {
+		} else if (term_winch != cw && !winch && quit_state >= 0) {
 			cw = term_winch;
 			goto re;
 		}
@@ -318,11 +318,11 @@ sbuf *cmd_pipe(char *cmd, sbuf *ibuf, s64 oproc, s64 *status)
 	s64 nw = 0;
 	char *argv[5];
 	argv[0] = xgetenv(sh);
-	argv[1] = xish ? "-i" : argv[0];
+	argv[1] = opt_interactive_shell ? "-i" : argv[0];
 	argv[2] = "-c";
 	argv[3] = cmd;
 	argv[4] = NULL;
-	s64 pid = cmd_make(argv+!xish, ibuf ? &ifd : NULL, oproc ? &ofd : NULL);
+	s64 pid = cmd_make(argv+!opt_interactive_shell, ibuf ? &ifd : NULL, oproc ? &ofd : NULL);
 	if (pid <= 0)
 		return NULL;
 	sbuf *sb;

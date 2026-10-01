@@ -385,7 +385,7 @@ extern s64 xrows, xcols;
 extern u64 tibuf_pos, tibuf_cnt, tibuf_sz, ticmd_pos;
 extern unsigned char *tibuf, ticmd[4096];
 extern u64 texec, texec_n;
-#define term_write(s, n) if (xled) write(1, s, n);
+#define term_write(s, n) if (opt_line_editor) write(1, s, n);
 void term_init(void);
 void term_done(void);
 void term_clean(void);
@@ -410,8 +410,8 @@ void term_push(char *s, u64 n);
 	preserve(s64, texec, texec = type;) \
 	vi(0); \
 	restore(texec) \
-	if (xquit > 0) \
-		xquit = 0; \
+	if (quit_state > 0) \
+		quit_state = 0; \
 	restore(tibuf_pos) \
 	restore(tibuf_cnt) \
 	restore(texec_n) \
@@ -464,7 +464,7 @@ typedef struct {
 } ins_state;
 #define ins_init(is) \
 is.t_row = -2; \
-is.p_reg = xdefreg; \
+is.p_reg = default_reg; \
 is.lsug = 0; \
 is.sug_pt = -1; \
 is.sug = NULL; \
@@ -536,85 +536,85 @@ struct buf {
 	s64 ts;				/* tabspace - number of spaces for tab */
 };
 /* ex options */
-extern s64 xleft;
-extern s64 xvis;
-extern s64 xai;
-extern s64 xic;
-extern s64 xhl;
-extern s64 xhll;
-extern s64 xhlw;
-extern s64 xhlp;
-extern s64 xhlr;
-extern s64 xled;
-extern s64 xtd;
-extern s64 xshape;
-extern s64 xorder;
-extern s64 xts;
+extern s64 opt_left_col;
+extern s64 opt_startup_flags;
+extern s64 opt_autoindent;
+extern s64 opt_ignorecase;
+extern s64 opt_syntax_hl;
+extern s64 opt_hl_line;
+extern s64 opt_hl_word;
+extern s64 opt_hl_pair;
+extern s64 opt_hl_reverse;
+extern s64 opt_line_editor;
+extern s64 opt_text_dir;
+extern s64 opt_shaping;
+extern s64 opt_reorder;
+extern s64 opt_tabstop;
 extern s64 xet;
 extern s64 xsw;
 extern s64 xidt;
-extern s64 xish;
-extern s64 xgrp;
+extern s64 opt_interactive_shell;
+extern s64 opt_search_group;
 extern s64 xaspec;
-extern s64 xpac;
+extern s64 opt_print_autocomplete;
 extern s64 xtc;
-extern s64 xmpt;
-extern s64 xpr;
-extern s64 xlim;
+extern s64 opt_multiline_prompt;
+extern s64 opt_print_reg;
+extern s64 opt_render_limit;
 extern s64 xlw;
 extern s64 xhllw;
-extern s64 xseq;
-extern s64 xerr;
-extern s64 xfr;
-extern s64 xrr;
+extern s64 opt_undo_seq;
+extern s64 opt_error_mode;
+extern s64 opt_find_reg;
+extern s64 opt_record_reg;
 /* global variables */
-extern s64 xquit;
-extern s64 xrow, xoff, xtop, xtopsub;
-extern s64 xbufcur;
-extern s64 xgrec;
-extern s64 xkmap;
-extern s64 xkmap_alt;
-extern s64 xkwddir;
-extern s64 xkwdcnt;
-extern s64 xpln;
-extern s64 xsep;
-extern s64 xesc;
-extern s64 xexec_dep;
-extern sbuf *xacreg;
-extern rstr *xkwdrs;
-extern sbuf **xregs;
-extern s64 xregs_n;
-extern s64 xdefreg;
+extern s64 quit_state;
+extern s64 cursor_row, cursor_off, view_top_row, xtopsub;
+extern s64 buf_count;
+extern s64 vi_ex_depth;
+extern s64 cur_keymap;
+extern s64 keymap_alt;
+extern s64 search_dir;
+extern s64 search_changes;
+extern s64 print_newline;
+extern s64 ex_separator;
+extern s64 ex_escape;
+extern s64 ex_exec_depth;
+extern sbuf *autocomplete_filter;
+extern rstr *search_rset;
+extern sbuf **str_registers;
+extern s64 str_registers_n;
+extern s64 default_reg;
 extern struct buf *bufs;
 extern struct buf tempbufs[5];
-extern struct buf *ex_buf;
-extern struct buf *ex_pbuf;
+extern struct buf *cur_buf;
+extern struct buf *prev_buf;
 #define istempbuf(buf) (buf >= tempbufs && buf < tempbufs + LEN(tempbufs))
-#define xb_path ex_buf->path
-#define xb_ft ex_buf->ft
-#define xb ex_buf->lb
+#define xb_path cur_buf->path
+#define xb_ft cur_buf->ft
+#define xb cur_buf->lb
 #define exbuf_load(buf) \
-	xrow = buf->row; \
-	xoff = buf->off; \
-	xtop = buf->top; \
+	cursor_row = buf->row; \
+	cursor_off = buf->off; \
+	view_top_row = buf->top; \
 	xtopsub = buf->topsub; \
-	xtd = buf->td; \
+	opt_text_dir = buf->td; \
 	xet = buf->et; \
 	xsw = buf->sw; \
-	xts = buf->ts; \
+	opt_tabstop = buf->ts; \
 
 #define exbuf_save(buf) \
-	buf->row = xrow; \
-	buf->off = xoff; \
-	buf->top = xtop; \
+	buf->row = cursor_row; \
+	buf->off = cursor_off; \
+	buf->top = view_top_row; \
 	buf->topsub = xtopsub; \
-	buf->td = xtd; \
+	buf->td = opt_text_dir; \
 	buf->et = xet; \
 	buf->sw = xsw; \
-	buf->ts = xts; \
+	buf->ts = opt_tabstop; \
 
 #define bufs_switchwft(idx) \
-{ if (&bufs[idx] != ex_buf) { bufs_switch(idx); syn_setft(xb_ft); } } \
+{ if (&bufs[idx] != cur_buf) { bufs_switch(idx); syn_setft(xb_ft); } } \
 
 void bufs_switch(s64 idx);
 void temp_open(s64 i, char *name, char *ft);
