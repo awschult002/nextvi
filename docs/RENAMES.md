@@ -1,6 +1,6 @@
 # Rename map
 
-Old names from upstream `kyx0r/nextvi` and their new names. On this branch the base is `patched/upstream-1635521b` (upstream `1635521b` + the patches in `PATCHES.md`); the binary reference for the rename check is `f2aa0fe9…efaf`. The tables were first written against `b1c78886`. Generated from `scripts/renames-globals.tsv`; replay with `scripts/rename.sh` on a fresh upstream.
+Old names from upstream `kyx0r/nextvi` and their new names. On this branch the base is `patched/upstream-1635521b` (upstream `1635521b` + the patches in `PATCHES.md`); the binary reference for the rename check is `f2aa0fe9…efaf`. The tables were first written against `b1c78886`. Generated from the four tables in `scripts/` (`renames-globals.tsv`, `renames-term.tsv`, `renames-vi-lnum.tsv`, `renames-patches.tsv`); replay them with `scripts/rename.sh` on a fresh patched base.
 
 ### Replaying on a fresh upstream
 
@@ -16,7 +16,7 @@ sh ./cbuild.sh
 
 Reruns are safe. A row whose old name is gone and whose new name is present is reported as "already applied" and skipped. If both names are present, that's a real collision, and the script stops before editing anything.
 
-After the last table, `rename.sh` runs `scripts/unmapped.sh`. It lists every file-scope global (`extern`, `static` and `__thread` variables in every `.c` and `.h`, except the vendored `cJSON.*` and `jsmn.h`) that no table renames and that isn't in `scripts/renames-keep.txt` (the names deliberately left alone). Upstream statics that no table renames yet (for example `acsb`, `vi_arg`, `xserr`) are still listed; that list is the baseline to compare against after a merge. `scripts/renames-allow.txt` lists known false matches, for example treesitter's `capture_n` struct member, so they aren't flagged as collisions. String literals are never renamed. After an upstream merge, that list tells you which rows to add. The `LN_*` constants and the Doxygen comments aren't in the tables; they come over by merging their commits.
+After the last table, `rename.sh` runs `scripts/unmapped.sh`. It lists every file-scope global (`extern`, `static` and `__thread` variables in every `.c` and `.h`, except the vendored `cJSON.*` and `jsmn.h`) that no table renames and that isn't in `scripts/renames-keep.txt` (the names deliberately left alone). Upstream statics that no table renames yet (for example `acsb`, `vi_arg`, `xserr`) are still listed; that list is the baseline to compare against after a merge, and anything new in it tells you which rows to add. `scripts/renames-allow.txt` lists known false matches, for example treesitter's `capture_n` struct member, so they aren't flagged as collisions. String literals are never renamed. The `LN_*` constants and the Doxygen comments aren't in the tables; they come over by merging their commits.
 
 ## Globals (`scripts/renames-globals.tsv`)
 
