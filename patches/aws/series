@@ -7,6 +7,8 @@
 
 # kyx0r/nextvi `patches` branch commit the 16 patch scripts come from.
 patches-commit 08a66e3c79443478037e13042b8392d0e2890757 https://github.com/kyx0r/nextvi
+# upstream commit the current AWS is built on (written by selfcopy; read by the export guard)
+upstream-base 1635521baf481c152afb94c64e6906652af15e28
 
 # --- 16 patch scripts (docs/PATCHES.md order) with their fix commits ---
 script lsp
@@ -77,7 +79,8 @@ am 0037-docs-ARCHITECTURE.md-rebuild-AWS-on-upstream-sync-re.patch
 am 0038-docs-Makefile-and-scripts-rebuild-aws.sh-PATCHES.md-.patch
 am 0039-docs-rebuild-steps-use-rebuild-aws.sh-and-git-am-USA.patch
 
-# this script and patches/aws itself
+# hand edits exported with --export (they land here), then this script and patches/aws
+am 0040-docs-ARCHITECTURE.md-export-guard-and-rebuild-aws.sh.patch
 selfcopy
 
 # Known anchor reports (DBG1=1) that are not failures; see docs/PATCHES.md.

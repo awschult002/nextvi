@@ -1,12 +1,28 @@
 #!/bin/sh
 # Rebuild the AWS branch from bare upstream, following patches/aws/series.
 #
-# Usage: scripts/rebuild-aws.sh [-b branch] [-d dir] [-k] [-t] [upstream-ref]
+# Usage: scripts/rebuild-aws.sh [-b branch] [-d dir] [-a aws] [-k] [-t] [upstream-ref]
+#        scripts/rebuild-aws.sh --check-export [-a aws]
+#        scripts/rebuild-aws.sh --export COMMIT
 #   upstream-ref  commit to start from (default: master)
 #   -b branch     new local branch (default: aws-rebuild-<short sha>)
 #   -d dir        worktree for it (default: ../nextvi-<branch> next to this checkout)
+#   -a aws        the AWS branch the export guard checks (default: origin/AWS, fetched)
 #   -k            keep going after an unmapped.sh difference (report only)
-#   -t            print the commands that tag the old AWS and move AWS (never runs them)
+#   -t            run the export guard, then the rebuild, then print the commands
+#                 that tag the old AWS and move AWS (never runs them)
+#   --check-export  only run the export guard
+#   --export COMMIT  format-patch COMMIT into patches/aws (next number) and add
+#                 an `am` line before `selfcopy` in the series; commit the result
+#
+# Export guard: rebuild the upstream base of AWS with this series in a
+# temporary worktree and diff it against AWS (merged with this checkout's
+# HEAD, so commits pending here count as exported). Anything left, outside
+# scripts/rebuild-aws.sh, patches/aws/ and a Makefile AWS does not have yet, is
+# a commit on AWS that was never exported: the guard lists it and fails. The
+# base is the `upstream-base` line of that merged patches/aws/series (selfcopy
+# writes it); without one, git merge-base AWS upstream-ref, which is only
+# right if upstream-ref is not behind the base.
 #
 # Steps (see patches/aws/series):
 #   script NAME [VAR=val...]  run kyx0r's patch script NAME.sh from the pinned
@@ -25,11 +41,15 @@ set -eu
 die() { printf '\nSTOP at step %s: %s\n' "${STEP:-setup}" "$*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
 
-BR= DIR= KEEP=0 TAG=0
-while getopts b:d:kt o; do
+BR= DIR= KEEP=0 TAG=0 CHECK=0 EXPORT= AWS=
+case ${1:-} in
+--check-export) CHECK=1; shift ;;
+--export) EXPORT=${2:?--export needs a commit}; shift 2 ;;
+esac
+while getopts a:b:d:kt o; do
 	case $o in
-	b) BR=$OPTARG ;; d) DIR=$OPTARG ;; k) KEEP=1 ;; t) TAG=1 ;;
-	*) sed -n '2,10s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+	a) AWS=$OPTARG ;; b) BR=$OPTARG ;; d) DIR=$OPTARG ;; k) KEEP=1 ;; t) TAG=1 ;;
+	*) sed -n '2,24s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
 	esac
 done
 shift $((OPTIND - 1))
@@ -47,6 +67,65 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 unset CFLAGS CPPFLAGS LDFLAGS LDLIBS || true
 export CC=cc
+
+if [ -n "$EXPORT" ]; then
+	c=$(git -C "$SRC" rev-parse --verify "$EXPORT^{commit}") || die "unknown commit $EXPORT"
+	pid=$(git -C "$SRC" show "$c" | git patch-id --stable | cut -d' ' -f1)
+	for f in "$PD"/*.patch; do
+		[ "$(git patch-id --stable < "$f" | cut -d' ' -f1)" = "$pid" ] && die "$EXPORT is already exported as ${f##*/}"
+	done
+	n=$(ls "$PD" | sed -n 's/^\([0-9][0-9]*\)-.*\.patch$/\1/p' | sort -n | tail -1 | sed 's/^0*//')
+	f=$(git -C "$SRC" format-patch -1 --zero-commit --no-signature \
+		--start-number $((${n:-0} + 1)) -o "$PD" "$c")
+	awk -v l="am ${f##*/}" '$1 == "selfcopy" && !d { print l; d = 1 } { print }' "$SERIES" > "$TMP/series"
+	grep -q "^am ${f##*/}\$" "$TMP/series" || die "no selfcopy line in $SERIES"
+	cat "$TMP/series" > "$SERIES"
+	say "exported $(git -C "$SRC" log -1 --format='%h %s' "$c") as patches/aws/${f##*/}"
+	exit 0
+fi
+
+# Export guard (see the header). Rebuilds by running this script on the base.
+guard() {
+	if [ -z "$AWS" ]; then
+		AWS=origin/AWS
+		git -C "$SRC" fetch -q origin AWS || say "warning: cannot fetch origin AWS; using the local $AWS"
+	fi
+	git -C "$SRC" rev-parse -q --verify "$AWS^{commit}" >/dev/null || die "unknown AWS ref $AWS"
+	want=$(git -C "$SRC" merge-tree --write-tree "$AWS" HEAD) || die "$AWS and HEAD do not merge cleanly"
+	base=$(git -C "$SRC" show "$want:patches/aws/series" 2>/dev/null | sed -n 's/^upstream-base[ \t]*//p')
+	[ -n "$base" ] || base=$(git -C "$SRC" merge-base "$AWS" "$UPSHA") ||
+		die "no upstream-base in the series and no merge base of $AWS and $UP"
+	git -C "$SRC" merge-base --is-ancestor "$base" "$AWS" || die "upstream-base $base is not in $AWS"
+	set -- . ':!scripts/rebuild-aws.sh' ':!patches/aws'
+	git -C "$SRC" cat-file -e "$AWS:Makefile" 2>/dev/null || set -- "$@" ':!Makefile'
+	gb=aws-export-guard-$$
+	say "export guard: rebuilding $AWS's upstream base $(echo "$base" | cut -c1-8) ..."
+	sh "$SRC/scripts/rebuild-aws.sh" -b "$gb" -d "$TMP/guard" "$base" > "$TMP/guard.log" 2>&1 || {
+		tail -15 "$TMP/guard.log" >&2
+		git -C "$SRC" worktree remove --force "$TMP/guard" 2>/dev/null || true
+		git -C "$SRC" branch -q -D "$gb" 2>/dev/null || true
+		die "export guard: the rebuild of $base failed (log above)"; }
+	git -C "$SRC" diff --stat "$want" "$gb" -- "$@" > "$TMP/guard.stat"
+	paths=$(git -C "$SRC" diff --name-only "$want" "$gb" -- "$@")
+	git -C "$SRC" worktree remove --force "$TMP/guard"
+	git -C "$SRC" branch -q -D "$gb"; rm -f "$TMP/guard.ref.bin"
+	if [ -s "$TMP/guard.stat" ]; then
+		say "export guard FAILED: $AWS differs from a rebuild of $base:" >&2
+		cat "$TMP/guard.stat" >&2
+		for f in $(sed -n 's/^am[ \t]*//p' "$SERIES"); do git patch-id --stable < "$PD/$f"; done |
+			cut -d' ' -f1 > "$TMP/pids"
+		say "commits on $AWS since $(echo "$base" | cut -c1-8) touching these paths and not in the series:" >&2
+		for c in $(git -C "$SRC" rev-list --no-merges "$base..$AWS" -- $paths); do
+			pid=$(git -C "$SRC" show "$c" | git patch-id --stable | cut -d' ' -f1)
+			grep -qx "$pid" "$TMP/pids" || git -C "$SRC" log -1 --format='  %h %ad %s' --date=short "$c" >&2
+		done
+		say "export them with: scripts/rebuild-aws.sh --export COMMIT" >&2
+		exit 1
+	fi
+	say "export guard: a rebuild of $(echo "$base" | cut -c1-8) reproduces $AWS"
+}
+if [ $CHECK = 1 ]; then guard; exit 0; fi
+[ $TAG = 1 ] && guard
 
 # Pinned kyx0r patches-branch commit: "patches-commit SHA URL" in the series.
 set -- $(sed -n 's/^patches-commit[ \t]*//p' "$SERIES")
@@ -150,7 +229,7 @@ APPLIED=
 i=0
 grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$SERIES" > "$TMP/steps"
 while read -r op a rest <&3; do
-	case $op in patches-commit|expect) continue ;; esac
+	case $op in patches-commit|upstream-base|expect) continue ;; esac
 	i=$((i + 1)); STEP="$i ($op${a:+ $a})"
 	say "[$i] $op ${a:-} ${rest:-}"
 	case $op in
@@ -180,6 +259,12 @@ while read -r op a rest <&3; do
 		mkdir -p patches scripts
 		rm -rf patches/aws; cp -R "$PD" patches/aws
 		cp "$SRC/scripts/rebuild-aws.sh" scripts/rebuild-aws.sh
+		# record the base, for the export guard of the next rebuild
+		if grep -q '^upstream-base' "$PD/series"; then
+			sed "s/^upstream-base.*/upstream-base $UPSHA/" "$PD/series"
+		else
+			awk -v b="upstream-base $UPSHA" '{ print } /^patches-commit/ { print b }' "$PD/series"
+		fi > patches/aws/series
 		git add patches/aws scripts/rebuild-aws.sh
 		git commit -q -m "rebuild: add scripts/rebuild-aws.sh and patches/aws" ;;
 	*)	die "unknown step '$op'" ;;
@@ -194,8 +279,8 @@ refbuild "$TMP/cur.bin"; cmp -s "$TMP/ref.bin" "$TMP/cur.bin" || die "final bina
 say "done: $BR at $(git rev-parse --short HEAD) in $DIR"
 say "reference binary: $DIR.ref.bin"
 if [ $TAG = 1 ]; then
-	old=$(git -C "$SRC" merge-base origin/AWS origin/master 2>/dev/null | cut -c1-8)
+	old=$(echo "${base:-}" | cut -c1-8)	# the guard's base of the old AWS
 	say "To keep the old AWS and move AWS to this branch (not run):"
-	say "  git tag AWS-${old:-<old upstream sha>} origin/AWS && git push origin AWS-${old:-<old upstream sha>}"
+	say "  git tag AWS-$old $AWS && git push origin AWS-$old"
 	say "  git push --force-with-lease=AWS origin $BR:AWS"
 fi

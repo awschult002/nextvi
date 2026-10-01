@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Thu, 1 Oct 2026 12:36:18 +0000
+Subject: [PATCH] docs(ARCHITECTURE.md): export guard and rebuild-aws.sh
+ --export
+
+---
+ docs/ARCHITECTURE.md | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 83c5b101..43271e9a 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -60,9 +60,9 @@ Upstream is `kyx0r/nextvi`, which is still active. **Order for an upstream merge
+ 
+ 1. Sync `master` with `kyx0r`.
+ 2. Run `scripts/rebuild-aws.sh master`. It works on a new local branch in its own worktree and follows `patches/aws/series`. It runs the 16 patch scripts from the pinned `patches` commit, applies the fix commits with `git am`, builds that tree and saves the binary as the **new reference** (a stored sha such as `f2aa0fe9…efaf` is only valid for one upstream commit), replays the four rename tables, applies the `LN_*` and comment edits, and checks `unmapped.sh`. After the reference step, every step that changes a `.c` or `.h` file must keep the stripped binary identical. The script stops at the first failing anchor, conflict or check and names the step. It never pushes.
+-3. Run `rebuild-aws.sh -t` to print the commands that tag the old `AWS` (for example `AWS-1635521b`) and move `AWS` to the new branch. Check them, then run them.
++3. Run `rebuild-aws.sh -t` to print the commands that tag the old `AWS` (for example `AWS-1635521b`) and move `AWS` to the new branch. Check them, then run them. Before rebuilding, `-t` runs the **export guard**: it rebuilds the upstream base of the current `AWS` (the `upstream-base` line in `patches/aws/series`) and diffs the result against `AWS`. Any difference outside the rebuild's own files (`scripts/rebuild-aws.sh`, `patches/aws/`, a new `Makefile`) is a commit on `AWS` that was never exported. The guard lists those commits and exits nonzero without printing the commands. `rebuild-aws.sh --check-export` runs only the guard.
+ 
+ A rebuild gives every commit a new SHA. SHAs cited in the docs point into the history before the rebuild, and the old tag keeps them reachable.
+ 
+-**Where a rebuild needs a person:** conflicts in the `git am` files when upstream changed nearby code, updating `expect` lines in `series` and `unmapped.expected` when anchors move, and exporting any new hand edit on `AWS` into `patches/aws/` with `git format-patch` (otherwise the next rebuild drops it). To keep rebuilds cheap, put configuration in as few commits as possible, and keep it out of the files the patches touch most.
++**Where a rebuild needs a person:** conflicts in the `git am` files when upstream changed nearby code, updating `expect` lines in `series` and `unmapped.expected` when anchors move, and exporting any new hand edit on `AWS` into `patches/aws/` with `scripts/rebuild-aws.sh --export <commit>` (otherwise the next rebuild drops it; the export guard catches this). To keep rebuilds cheap, put configuration in as few commits as possible, and keep it out of the files the patches touch most.
+ 
