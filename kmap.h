@@ -1,7 +1,18 @@
+/**
+ * @file kmap.h
+ * @brief Keymap and digraph tables, included only by conf.c.
+ *
+ * A keymap maps an input byte to the UTF-8 string inserted for it in insert
+ * mode; entry [0] is the keymap's name and NULL entries insert the key
+ * itself (see kmap_map() in led.c).
+ */
+
+/** English: no remapping. */
 static char *kmap_en[256] = {
 	[0] = "en",
 };
 
+/** Persian (Farsi) keyboard layout. */
 static char *kmap_fa[256] = {
 	[0] = "fa",
 	['`'] = "‍",
@@ -100,6 +111,7 @@ static char *kmap_fa[256] = {
 	['|'] = "|",
 };
 
+/** Russian keyboard layout. */
 static char *kmap_ru[256] = {
 	[0] = "ru",
 	['q'] = "й",
@@ -185,8 +197,11 @@ static char *kmap_ru[256] = {
 	['|'] = "|",
 };
 
+/** All keymaps; indexed by conf_kmap(), searched by name by conf_kmapfind(). */
 static char **kmaps[] = {kmap_en, kmap_fa, kmap_ru};
 
+/** Digraphs for ^k in insert mode: {two keys, result}. conf_digraph()
+ * compares only the first two bytes of the key string. */
 static char *digraphs[][2] = {
 	/* digraphs */
 	{"cq", "’"},
