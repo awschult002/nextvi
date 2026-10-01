@@ -75,6 +75,7 @@ am 0035-docs-RENAMES.md-name-all-four-tables-tidy-unmapped.s.patch
 am 0036-docs-ARCHITECTURE.md-branch-model-master-mirrors-ups.patch
 am 0037-docs-ARCHITECTURE.md-rebuild-AWS-on-upstream-sync-re.patch
 am 0038-docs-Makefile-and-scripts-rebuild-aws.sh-PATCHES.md-.patch
+am 0039-docs-rebuild-steps-use-rebuild-aws.sh-and-git-am-USA.patch
 
 # this script and patches/aws itself
 selfcopy
