@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Wed, 30 Sep 2026 21:25:42 +0000
+Subject: [PATCH] fix: treesitter: ts_capture_cmp must return int for qsort
+ (64bit made it s64)
+
+Same 64bit.sh rewrite as spell_cmp; the comparator only returns -1/0/1.
+---
+ treesitter.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/treesitter.c b/treesitter.c
+index c74c73ed..38a2921a 100644
+--- a/treesitter.c
++++ b/treesitter.c
+@@ -313,7 +313,7 @@ s64 ts_preview_update(struct ts_state *s, char *text)
+ 	return 1;
+ }
+ 
+-static s64 ts_capture_cmp(const void *a, const void *b)
++static int ts_capture_cmp(const void *a, const void *b)
+ {
+ 	const struct ts_capture *x = a, *y = b;
+ 	if (x->pattern != y->pattern)

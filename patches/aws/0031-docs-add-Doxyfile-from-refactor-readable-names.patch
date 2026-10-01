@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Thu, 1 Oct 2026 01:39:45 +0000
+Subject: [PATCH] docs: add Doxyfile from refactor/readable-names
+
+---
+ .gitignore |  3 +++
+ Doxyfile   | 10 ++++++++++
+ 2 files changed, 13 insertions(+)
+ create mode 100644 Doxyfile
+
+diff --git a/.gitignore b/.gitignore
+index 9e361c17..e8023a18 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -10,3 +10,6 @@ patch2vi
+ CLAUDE.md
+ AGENTS.md
+ .treesitter
++
++# doxygen output
++docs/api/
+diff --git a/Doxyfile b/Doxyfile
+new file mode 100644
+index 00000000..39a86334
+--- /dev/null
++++ b/Doxyfile
+@@ -0,0 +1,10 @@
++PROJECT_NAME     = nextvi
++INPUT            = . docs/DOXYGEN.md
++FILE_PATTERNS    = *.c *.h *.md
++OPTIMIZE_OUTPUT_FOR_C = YES
++EXTRACT_ALL      = YES
++EXTRACT_STATIC   = YES
++SOURCE_BROWSER   = YES
++GENERATE_LATEX   = NO
++OUTPUT_DIRECTORY = docs/api
++QUIET            = YES

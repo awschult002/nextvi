@@ -1,0 +1,120 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Thu, 1 Oct 2026 01:46:49 +0000
+Subject: [PATCH] scripts: unmapped.sh scans every .c/.h for file-scope globals
+
+Previously only vi.h externs were checked. Now extern, static and __thread (fixes 'ren_state rstate') file-scope variables in all sources except vendored cJSON.*/jsmn.h; comments and literals stripped in one pass; functions, prototypes, typedefs, members and file-scope macro calls (EO) skipped. Output names the defining files. Cross-checked against nm of an -O0 object: only function-local statics, cJSON and external headers differ.
+---
+ scripts/rename.sh   |  4 +--
+ scripts/unmapped.sh | 80 +++++++++++++++++++++++++++++++++++++--------
+ 2 files changed, 68 insertions(+), 16 deletions(-)
+
+diff --git a/scripts/rename.sh b/scripts/rename.sh
+index 68ad61cf..cb5b7f45 100755
+--- a/scripts/rename.sh
++++ b/scripts/rename.sh
+@@ -1,6 +1,6 @@
+ #!/bin/sh
+ # Replay a whole-word rename table (old<TAB>new per line) over the C sources.
+-# Usage: scripts/rename.sh scripts/renames-globals.tsv   (then -term, -vi-lnum)
++# Usage: scripts/rename.sh scripts/renames-globals.tsv   (then -term, -vi-lnum, -patches)
+ #
+ # nextvi is a unity build (vi.c #includes every .c), so renames and collision
+ # checks always cover every *.c and *.h in the tree.
+@@ -59,5 +59,5 @@ while IFS='	' read -r old new; do
+ done < "$todo"
+ echo "renamed $(wc -l < "$todo") names"
+ 
+-# Report vi.h globals that no table maps (e.g. new upstream globals). Informational only.
++# Report file-scope globals that no table maps (e.g. new upstream globals). Informational only.
+ scripts/unmapped.sh || true
+diff --git a/scripts/unmapped.sh b/scripts/unmapped.sh
+index 850d3649..af161fed 100755
+--- a/scripts/unmapped.sh
++++ b/scripts/unmapped.sh
+@@ -1,19 +1,71 @@
+ #!/bin/sh
+-# List globals declared `extern` in vi.h that are neither a new name in any
+-# scripts/renames-*.tsv table nor listed in scripts/renames-keep.txt
+-# (names deliberately left as they are). After an upstream merge, anything
+-# printed here is a global upstream added: give it a table row or keep it.
+-# Exit status 1 if anything is unmapped.
++# List file-scope globals (extern, static, __thread, plain definitions) in
++# every *.c and *.h that are neither a new name in any scripts/renames-*.tsv
++# table nor listed in scripts/renames-keep.txt (names deliberately left as
++# they are). Functions, prototypes, typedefs, struct members, enum constants
++# and file-scope macro invocations such as EO(...) are skipped. Vendored
++# third-party code (cJSON.*, jsmn.h) is not scanned.
++# After an upstream merge, anything printed here is a global upstream added:
++# give it a table row or keep it. Exit status 1 if anything is unmapped.
+ cd "$(dirname "$0")/.."
+-perl -ne '
+-	next unless /^\s*extern\b/; s/\/\/.*|\/\*.*?\*\///g; s/\[[^\]]*\]//g; s/=[^,;]*//g;
+-	s/^\s*extern\s+(const\s+)?(unsigned\s+|signed\s+)?(struct\s+\w+|\w+)\s*//;
+-	s/[*;]//g; print "$_\n" for grep /\w/, map { s/^\s+|\s+$//gr } split /,/;
+-' vi.h | sort -u > /tmp/unmapped.$$
++files=$(ls *.c *.h | grep -v '^cJSON\.' | grep -v '^jsmn\.h$')
++perl -e '
++use strict; use warnings;
++local $/;
++for my $f (@ARGV) {
++	open my $fh, '\''<'\'', $f or die "$f: $!"; my $s = <$fh>; close $fh;
++	# comments and literals in one pass, so "//" in a string is not a comment
++	$s =~ s{(/\*.*?\*/)|//[^\n]*|("(?:\\.|[^"\\\n])*")|('\''(?:\\.|[^'\''\\\n])*'\'')}{defined $1 ? '\'' '\'' : defined $2 ? '\''""'\'' : defined $3 ? "'\'''\''" : '\'''\''}gse;
++	$s =~ s{^[ \t]*#(?:[^\n]*\\\n)*[^\n]*}{}mg;	# preprocessor lines
++	# collapse every brace block to {} so only file-scope text remains
++	1 while $s =~ s/\{[^{}]*\}/\x01/g;
++	$s =~ s/\x01/{}/g;
++	# drop file-scope macro invocations: UPPER(...) not followed by '\'';'\''
++	1 while $s =~ s/(^|[;}\n])\s*_?[A-Z][A-Z0-9_]*\s*(\((?:[^()]++|(?2))*\))(?!\s*;)/$1\n/g;
++	for my $st (split /;/, $s) {
++		$st =~ s/^\s+|\s+$//g;
++		$st =~ s/\s+/ /g;
++		next if $st eq '\'''\'';
++		$st =~ s/^(?:\}\s*)+//;		# function bodies end without '\'';'\''
++		# a function definition before this statement: keep what follows its body
++		$st =~ s/.*\)\s*\{\}\s*//;
++		next if $st eq '\'''\'' || $st =~ /^typedef\b/;
++		# split declarators at top-level commas, dropping initializers
++		my ($d, @decl) = (0, '\'''\'');
++		for my $c (split //, $st) {
++			$d++ if $c =~ /[(\[{]/; $d-- if $c =~ /[)\]}]/;
++			if ($c eq '\'','\'' && !$d) { push @decl, '\'''\''; next }
++			$decl[-1] .= $c;
++		}
++		my $first = 1;
++		for my $x (@decl) {
++			$x =~ s/=.*//s;
++			if ($first) {
++				$x =~ s/^(?:(?:extern|static|const|volatile|register|__thread|_Thread_local|inline)\s+)*//;
++				# the type: struct/union/enum with optional tag and body, or one word
++				$x =~ s/^(?:(?:struct|union|enum)\s*\w*\s*(?:\{\})?|(?:(?:unsigned|signed|long|short)\b\s*)+(?:(?:int|char|double)\b)?|\w+)\s*//
++					or next;
++				$x =~ s/^(?:(?:const|volatile)\s+)*//;
++				$first = 0;
++			}
++			next if $x =~ /^\s*\**\s*\w+\s*\(/;		# prototype
++			my ($n) = $x =~ /^\s*[\s*]*\(\s*\*\s*(\w+)\s*\)/;	# function pointer
++			($n) = $x =~ /^[\s*]*(?:const\s+)?(\w+)/ unless defined $n;
++			print "$n\t$f\n" if defined $n && $n !~ /^(?:const|volatile)$/;
++		}
++	}
++}
++' $files | sort -u > /tmp/unmapped.$$
+ { cut -f2 scripts/renames-*.tsv; grep -v '^#' scripts/renames-keep.txt 2>/dev/null; } | sort -u > /tmp/mapped.$$
+-out=$(comm -23 /tmp/unmapped.$$ /tmp/mapped.$$)
++out=$(cut -f1 /tmp/unmapped.$$ | sort -u | comm -23 - /tmp/mapped.$$)
++if [ -z "$out" ]; then
++	echo "all file-scope globals mapped or kept"
++	rm -f /tmp/unmapped.$$ /tmp/mapped.$$
++	exit 0
++fi
++echo "file-scope globals with no rename row and not in renames-keep.txt:"
++for n in $out; do
++	printf '  %s (%s)\n' "$n" "$(awk -F'\t' -v n="$n" '$1 == n { printf "%s%s", s, $2; s = " " }' /tmp/unmapped.$$)"
++done
+ rm -f /tmp/unmapped.$$ /tmp/mapped.$$
+-[ -z "$out" ] && { echo "all vi.h globals mapped or kept"; exit 0; }
+-echo "vi.h globals with no rename row and not in renames-keep.txt:"
+-echo "$out" | sed 's/^/  /'
+ exit 1

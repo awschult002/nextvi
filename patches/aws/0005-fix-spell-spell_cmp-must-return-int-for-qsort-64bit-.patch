@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Wed, 30 Sep 2026 21:25:28 +0000
+Subject: [PATCH] fix: spell: spell_cmp must return int for qsort (64bit made
+ it s64)
+
+64bit.sh's '(\<int\> )' -> 's64 ' rewrite turned the qsort comparator's return type into s64; qsort requires int (*)(const void *, const void *), and GCC 14 rejects the incompatible pointer. Only the return type is changed back.
+---
+ ex.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ex.c b/ex.c
+index 979cd0b5..0e8766ea 100644
+--- a/ex.c
++++ b/ex.c
+@@ -1502,7 +1502,7 @@ static char *spcmd;		/* the speller in use */
+ static char spmsg[128];		/* the speller's own complaint, forwarded */
+ 
+ /* speller lines by word, "& word cnt off: sug, sug" and "# word off" */
+-static s64 spell_cmp(const void *v1, const void *v2)
++static int spell_cmp(const void *v1, const void *v2)
+ {
+ 	char *s1 = *(char *const *)v1 + 2, *s2 = *(char *const *)v2 + 2;
+ 	for (; *s1 == *s2 && *s1 && *s1 != ' '; s1++, s2++);

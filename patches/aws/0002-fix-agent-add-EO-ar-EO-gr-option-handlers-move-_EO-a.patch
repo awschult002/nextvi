@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Schultz <alexschultz002@gmail.com>
+Date: Wed, 30 Sep 2026 21:21:31 +0000
+Subject: [PATCH] fix: agent: add EO(ar) EO(gr) option handlers; move _EO(aco)
+ to its intended place
+
+agent.sh edit m22 (s/s)/s) EO(ar) EO(gr)/ on the EO(hlp)..EO(vis) line) failed: its anchor was changed by detect_indent/tab_complete, so eo_ar/eo_gr were never defined and the build failed. Added them to that line by hand, as the embedded diff intends. _EO(aco,...) had fallen back to after _EO(lw,...); moved to after _EO(left,...) as in the embedded diff (no functional change).
+---
+ ex.c | 20 ++++++++++----------
+ 1 file changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/ex.c b/ex.c
+index 282a2f33..f05f8269 100644
+--- a/ex.c
++++ b/ex.c
+@@ -2013,7 +2013,7 @@ static void *eo_##opt(char *loc, char *cmd, char *arg) { inner }
+ 
+ EO(pac) EO(pr) EO(ai) EO(aspec) EO(err) EO(fr) EO(ish) EO(ic) EO(mpt)
+ EO(rr) EO(shape) EO(seq) EO(order) EO(hllw) EO(hll) EO(hlw)
+-EO(hlp) EO(hl) EO(lim) EO(led) EO(vis) EO(tc)
++EO(hlp) EO(hl) EO(lim) EO(led) EO(vis) EO(tc) EO(ar) EO(gr)
+ EO(et) EO(idt)
+ 
+ _EO(ts, xts = *arg ? eo_val(arg) : !xts; xts = MAX(0, xts); RST_NULL(0, 1, 2) return NULL;)
+@@ -2031,15 +2031,6 @@ _EO(lw,
+ 	return NULL;
+ )
+ 
+-_EO(aco,
+-	int browse = strchr(cmd, '!') != NULL;
+-	int value = *arg ? eo_val(arg) :
+-		(xaco && xaco_browse == browse ? 0 : 85000);
+-	xaco = MAX(0, value);
+-	xaco_browse = browse;
+-	return NULL;
+-)
+-
+ _EO(hlr,
+ 	xhlr = *arg ? eo_val(arg) : !xhlr;
+ 	led_ext *p = led_extfind(ext_hlr);
+@@ -2060,6 +2051,15 @@ _EO(left,
+ 	return NULL;
+ )
+ 
++_EO(aco,
++	int browse = strchr(cmd, '!') != NULL;
++	int value = *arg ? eo_val(arg) :
++		(xaco && xaco_browse == browse ? 0 : 85000);
++	xaco = MAX(0, value);
++	xaco_browse = browse;
++	return NULL;
++)
++
+ /* :lsp			list the registered servers
+  * :lsp <filetype> <cmd>	run <cmd> as the language server of <filetype> */
+ static void *ec_lsp(char *loc, char *cmd, char *arg)
