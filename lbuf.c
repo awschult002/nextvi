@@ -698,7 +698,7 @@ s64 lbuf_search(struct lbuf *lb, rstr *re, s64 dir, s64 beg, s64 end, s64 pskip,
 			utf8_length = fake_ulen;
 			for (s64 z = i+1; z < step; z++)
 				pthread_join(threads[z], NULL);
-			utf8_length = _utf8_length;
+			utf8_length = utf8_length_default;
 			utf8_length['\n'] = 1;
 			return 0;
 		}

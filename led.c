@@ -731,7 +731,7 @@ void led_modeswap(void)
  *                returned to the caller (the agent conversation prompt)
  * @return the key that ended input ('\n', an interrupt, an unhandled edit
  *         key, or ^o/^l with LED_AGENT)
- * With :et, ^t/^d/tab insert or remove xsw spaces instead of a tab; with :tc,
+ * With :et, ^t/^d/tab insert or remove opt_shiftwidth spaces instead of a tab; with :tc,
  * tab (or ^_) completes paths in ':' prompts.
  */
 static s64 led_line(sbuf *sb, s64 pre, s64 ps, char **post, s64 postn, char **postref,
@@ -768,19 +768,19 @@ static s64 led_line(sbuf *sb, s64 pre, s64 ps, char **post, s64 postn, char **po
 		case TK_CTL('t'):
 			cs = sdup(sb->s + ps, sb->s_n - ps);
 			sbuf_cut(sb, ps)
-			if (xet)
-				for (s64 _k = 0; _k < xsw; _k++)
+			if (opt_expandtab)
+				for (s64 _k = 0; _k < opt_shiftwidth; _k++)
 					sbuf_chr(sb, ' ')
 			else
 				sbuf_chr(sb, '\t')
 			sbuf_str(sb, cs)
 			free(cs);
-			pre += xet ? xsw : 1;
+			pre += opt_expandtab ? opt_shiftwidth : 1;
 			break;
 		case TK_CTL('d'):
-			if (xet) {
+			if (opt_expandtab) {
 				s64 _k;
-				for (_k = 0; _k < xsw && sb->s[ps + _k] == ' '; _k++);
+				for (_k = 0; _k < opt_shiftwidth && sb->s[ps + _k] == ' '; _k++);
 				if (_k) {
 					memmove(&sb->s[ps], &sb->s[ps + _k], len - ps - _k);
 					sb->s_n -= _k;
@@ -990,8 +990,8 @@ static s64 led_line(sbuf *sb, s64 pre, s64 ps, char **post, s64 postn, char **po
 		case '\t':
 			if (flg & 2)    /* the caller steps the search match */
 				break;
-			if (xtc && ai_max < 0 && sb->s[ps] == ':') {
-				s64 typed, full = c == TK_CTL('_') || xtc > 1;
+			if (opt_path_complete && ai_max < 0 && sb->s[ps] == ':') {
+				s64 typed, full = c == TK_CTL('_') || opt_path_complete > 1;
 				if (!compsb)
 					sbuf_make(compsb, 128)
 				sbuf_cut(compsb, 0)
@@ -1018,8 +1018,8 @@ static s64 led_line(sbuf *sb, s64 pre, s64 ps, char **post, s64 postn, char **po
 		default:
 			if (c == '\n' || TK_INT(c))
 				return c;
-			if (c == '\t' && xet) {
-				for (s64 _l = 0; _l < xsw; _l++)
+			if (c == '\t' && opt_expandtab) {
+				for (s64 _l = 0; _l < opt_shiftwidth; _l++)
 					sbuf_chr(sb, ' ')
 			} else if ((cs = led_read(kmap, c)))
 				sbuf_str(sb, cs)
@@ -1089,7 +1089,7 @@ s64 led_input(sbuf *sb, char *post, s64 postn, s64 row, s64 flg, s64 *pren,
 	char *postref = NULL;
 	ins_state is;
 	led_nextb = row + 1 - !!(flg & 4);
-	led_lw = xlw && led_row >= 0;
+	led_lw = opt_wrap_width && led_row >= 0;
 	while (1) {
 		ins_init(is)
 		key = led_line(sb, sb->s_n, ps, &post, postn, &postref,

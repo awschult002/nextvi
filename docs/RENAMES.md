@@ -4,18 +4,19 @@ Old names from upstream `kyx0r/nextvi` and their new names. On this branch the b
 
 ### Replaying on a fresh upstream
 
-Apply the patches first (see `PATCHES.md`), then run the three tables in this order. `rename.sh` handles the `EO()` macro change itself, so no cherry-pick is needed.
+Apply the patches first (see `PATCHES.md`), then run the four tables in this order. `rename.sh` handles the `EO()` macro change itself, so no cherry-pick is needed.
 
 ```sh
 sh scripts/rename.sh scripts/renames-globals.tsv
 sh scripts/rename.sh scripts/renames-term.tsv
 sh scripts/rename.sh scripts/renames-vi-lnum.tsv
+sh scripts/rename.sh scripts/renames-patches.tsv
 sh ./cbuild.sh
 ```
 
 Reruns are safe. A row whose old name is gone and whose new name is present is reported as "already applied" and skipped. If both names are present, that's a real collision, and the script stops before editing anything.
 
-After the last table, `rename.sh` runs `scripts/unmapped.sh`. It lists every `extern` global in `vi.h` that no table renames and that isn't in `scripts/renames-keep.txt` (the names deliberately left alone). `scripts/renames-allow.txt` lists known false matches, for example treesitter's `capture_n` struct member, so they aren't flagged as collisions. String literals are never renamed. After an upstream merge, that list tells you which rows to add. The `LN_*` constants and the Doxygen comments aren't in the tables; they come over by merging their commits.
+After the last table, `rename.sh` runs `scripts/unmapped.sh`. It lists every file-scope global (`extern`, `static` and `__thread` variables in every `.c` and `.h`, except the vendored `cJSON.*` and `jsmn.h`) that no table renames and that isn't in `scripts/renames-keep.txt` (the names deliberately left alone). Upstream statics that no table renames yet (for example `acsb`, `vi_arg`, `xserr`) are still listed; that list is the baseline to compare against after a merge. `scripts/renames-allow.txt` lists known false matches, for example treesitter's `capture_n` struct member, so they aren't flagged as collisions. String literals are never renamed. After an upstream merge, that list tells you which rows to add. The `LN_*` constants and the Doxygen comments aren't in the tables; they come over by merging their commits.
 
 ## Globals (`scripts/renames-globals.tsv`)
 
@@ -108,3 +109,29 @@ Notes: `ticmd*` holds the keys kept for `.` repeat. `texec` became `term_exec_ty
 `lnum_cur` is the local copy in `vi_drawrow`. The bare 1/2/4/8 mode values are now `LN_ONCE`, `LN_ABS`, `LN_INDENT` and `LN_REL`; see `docs/USAGE.md`.
 
 Other file-local statics in `vi.c`, `ren.c` and `led.c` are not renamed yet.
+
+## Patch-added globals (`scripts/renames-patches.tsv`)
+
+Globals added by the patches in `PATCHES.md`. Run this table after the other three. `:set` options get the `opt_` prefix.
+
+| Old | New | Defined in | Option |
+|---|---|---|---|
+| `xet` | `opt_expandtab` | ex.c | `:et`: indent with spaces instead of tabs |
+| `xsw` | `opt_shiftwidth` | ex.c | `:sw`: spaces per indent step when `:et` is set |
+| `xidt` | `opt_detect_indent_lines` | ex.c | `:idt[500]`: lines scanned on load to detect `et`/`sw`; 0 = off |
+| `xaspec` | `opt_agent_exspec` | ex.c | `:aspec[1]`: print each command's ex specification to the agent once |
+| `xtc` | `opt_path_complete` | ex.c | `:tc[1]`: tab path completion in the ex prompt; 1 inline, 2 full screen |
+| `xlw` | `opt_wrap_width` | ex.c | `:lw`: soft line-wrap column, 0 = off, capped by the screen |
+| `xhllw` | `opt_hl_wrap` | ex.c | `:hllw[1]`: mark the start and end of a soft-wrapped line |
+| `xgr` | `opt_agent_guardrails` | conf.c | `:gr[2]`: agent output protection; only 2 enables it |
+| `xar` | `opt_agent_reasoning` | conf.c | `:ar[0]`: show returned agent reasoning in the session log |
+| `xaco` | `opt_autocompact_tokens` | conf.c | `:aco`/`:aco!`: input-token threshold for auto-compaction; 0 = off |
+| `xaco_browse` | `opt_autocompact_browse` | conf.c | set by `:aco!` (browse the log) and cleared by `:aco` |
+| `xtopsub` | `view_top_segment` | ex.c | |
+| `conf_hlmat` | `conf_hl_match` | conf.c | |
+| `conf_hlmatc` | `conf_hl_match_cursor` | conf.c | |
+| `_utf8_length` | `utf8_length_default` | uc.c | |
+
+`view_top_segment` is the first visible wrap segment of `view_top_row`. `conf_hl_match` and `conf_hl_match_cursor` are the search-match attributes; the one under the cursor uses the second. `utf8_length_default` is the default table that the `utf8_length` pointer points to.
+
+Patch globals that already have descriptive names are listed in `scripts/renames-keep.txt` instead, for example `led_row`, `lsp_dirty`, `lsp_ft`, `spell_cmd`, `ts_preview`, `ts_redraw` and the `agent_*`, `exspec_*` and `lsp_*` state. A few patch statics with terse names (`compsb`, the `sp*` speller state in ex.c, `vi_lnwid`, `xaerr`, `xirrmsg`) are also in the keep list, like the upstream statics no table renames yet.

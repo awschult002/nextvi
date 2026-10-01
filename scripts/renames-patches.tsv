@@ -1,0 +1,15 @@
+xet	opt_expandtab
+xsw	opt_shiftwidth
+xidt	opt_detect_indent_lines
+xaspec	opt_agent_exspec
+xtc	opt_path_complete
+xlw	opt_wrap_width
+xhllw	opt_hl_wrap
+xgr	opt_agent_guardrails
+xar	opt_agent_reasoning
+xaco	opt_autocompact_tokens
+xaco_browse	opt_autocompact_browse
+xtopsub	view_top_segment
+conf_hlmat	conf_hl_match
+conf_hlmatc	conf_hl_match_cursor
+_utf8_length	utf8_length_default

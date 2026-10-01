@@ -103,7 +103,7 @@ static s64 ren_cwid(char *s, s64 pos)
 /* the number of columns a wrapped segment holds */
 s64 ren_wrapw(s64 lncol)
 {
-	s64 w = MIN(xlw, term_cols) - lncol;
+	s64 w = MIN(opt_wrap_width, term_cols) - lncol;
 	return w > 0 ? w : 1;
 }
 
@@ -132,7 +132,7 @@ ren_state *ren_position(char *s)
 	rstate->ctx = dir_context(s);
 	u64 n, max, l;
 	char *ss = s;
-	if (opt_render_limit >= 0 && !xlw && rstate == rstates+1) {
+	if (opt_render_limit >= 0 && !opt_wrap_width && rstate == rstates+1) {
 		max = (u64)opt_render_limit;
 		for (n = 0; n < max && (l = uc_len(ss)); n++)
 			ss += l;

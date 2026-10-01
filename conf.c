@@ -5,7 +5,7 @@
  * lookups into the keymap/digraph tables of kmap.h. Edit and rebuild.
  * Also: the agent's connection settings and extra :exspec lines (agent),
  * the speller command and per-filetype speller arguments (:sl), and the
- * search match colours (conf_hlmat, conf_hlmatc).
+ * search match colours (conf_hl_match, conf_hl_match_cursor).
  *
  * Filetype names are compared by pointer, not by string (see syn_setft()).
  */
@@ -29,10 +29,10 @@ static s64 request_timeout = 500;
 #endif
 
 static s64 max_tool_rounds = 300;
-s64 xgr = 2;	/* agent guardrails: anything but 2 = disabled */
-s64 xar;	/* display returned agent reasoning (:ar) */
-s64 xaco;	/* autocompact input-token threshold; 0 disables */
-static s64 xaco_browse;	/* last selected mode: aco! rather than aco */
+s64 opt_agent_guardrails = 2;	/* agent guardrails: anything but 2 = disabled (was xgr) */
+s64 opt_agent_reasoning;	/* display returned agent reasoning (:ar) (was xar) */
+s64 opt_autocompact_tokens;	/* autocompact input-token threshold; 0 disables (was xaco) */
+static s64 opt_autocompact_browse;	/* last selected mode: aco! rather than aco (was xaco_browse) */
 
 static char exspec_insert[] =
 	"Ex special characters are disabled and raw ex mode is on by default.\n"
@@ -454,10 +454,10 @@ const s64 hloptslen = LEN(hlopts);	///< number of entries in hlopts[]
 const s64 conf_hlrev = SYN_BGMK(8);
 
 /* how to highlight the search matches */
-const s64 conf_hlmat = RE1;
+const s64 conf_hl_match = RE1;
 
 /* how to highlight the search match the cursor lands on */
-const s64 conf_hlmatc = RE1 | SYN_BGMK(8);
+const s64 conf_hl_match_cursor = RE1 | SYN_BGMK(8);
 
 /* right-to-left characters */
 #define CR2L		"ء-يپچژکگی‌-‍؛،»«؟ً-ْٔ"

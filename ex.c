@@ -24,19 +24,19 @@ s64 opt_text_dir = +1;	///< text direction: +1/-1 default LTR/RTL with per-line 
 s64 opt_shaping = 1;	///< perform Arabic letter shaping (was xshape)
 s64 opt_reorder = 1;	///< bidi: reorder characters per dmarks[] (was xorder)
 s64 opt_tabstop = 8;	///< number of spaces for tab (was xts)
-s64 xet;	///< expandtab - use spaces for indentation
-s64 xsw = 8;	///< shiftwidth - indentation step
-s64 xidt = 500;	///< auto-detect indent on file open
+s64 opt_expandtab;	///< expandtab - use spaces for indentation (was xet)
+s64 opt_shiftwidth = 8;	///< shiftwidth - indentation step (was xsw)
+s64 opt_detect_indent_lines = 500;	///< auto-detect indent on file open (was xidt)
 s64 opt_interactive_shell;	///< run the shell with -i (was xish)
 s64 opt_search_group;	///< regex group used as match position, stored as group*2 (index into offs[]) (was xgrp)
-s64 xaspec = 1;	///< print each ex spec once for agents
+s64 opt_agent_exspec = 1;	///< print each ex spec once for agents (was xaspec)
 s64 opt_print_autocomplete;	///< print autocomplete options while inserting (was xpac)
-s64 xtc = 1;	///< tab path completion, 1: inline, 2: full screen
+s64 opt_path_complete = 1;	///< tab path completion, 1: inline, 2: full screen (was xtc)
 s64 opt_multiline_prompt;	///< counts lines printed from vi; >1 prompts "[any key to continue]", <0 disables (was xmpt)
 s64 opt_print_reg;	///< if >0, ex_cprint() also appends printed text to this register (was xpr)
 s64 opt_render_limit = -1;	///< max characters rendered on non-cursor lines, -1 = no limit (was xlim)
-s64 xlw;	///< soft line wrap column, 0 = off, capped by the screen
-s64 xhllw = 1;	///< highlight soft linewrap block start/end
+s64 opt_wrap_width;	///< soft line wrap column, 0 = off, capped by the screen (was xlw)
+s64 opt_hl_wrap = 1;	///< highlight soft linewrap block start/end (was xhllw)
 s64 opt_undo_seq = 1;	///< added to lbuf useq after each command; 0 merges commands into one undo step, <0 disables history (was xseq)
 s64 opt_error_mode = 1;	///< error handling bits: 1 print errors, 2 stop the command chain on error, 4 ex_exec() always reports success, except during agent tool execution (was xerr)
 s64 opt_find_reg;	///< if set, :f searches the text of this register instead of the buffer (was xfr)
@@ -45,8 +45,8 @@ s64 opt_record_reg;	///< register receiving raw keystrokes while recording, 0 = 
 s64 quit_state;	///< exit if positive (value-1 is the exit code), force quit or unwind if negative, see ec_quit() (was xquit)
 s64 cursor_row;		///< cursor row, 0-based line index in the current buffer (was xrow)
 s64 cursor_off;		///< cursor position as a character index into the line (not bytes or screen column); indexes rstate->chrs[] (was xoff)
-s64 view_top_row;	///< buffer row shown on the first screen line; with :lw its first visible segment is xtopsub (was xtop)
-s64 xtopsub;	///< the first visible segment of view_top_row
+s64 view_top_row;	///< buffer row shown on the first screen line; with :lw its first visible segment is view_top_segment (was xtop)
+s64 view_top_segment;	///< the first visible segment of view_top_row (was xtopsub)
 s64 buf_count;	///< number of used entries in bufs[] (was xbufcur)
 s64 vi_ex_depth;	///< nesting depth of vi()/ex() main loops (was xgrec)
 s64 cur_keymap;	///< index of the active keymap in kmaps[], 0 = en (was xkmap)
@@ -536,7 +536,7 @@ s64 ex_edit(const char *path, s64 len)
 static void ex_detect_indent(struct buf *p)
 {
 	s64 n = lbuf_len(p->lb);
-	s64 max = n < xidt ? n : xidt;
+	s64 max = n < opt_detect_indent_lines ? n : opt_detect_indent_lines;
 	s64 tab_lines = 0, space_lines = 0;
 	s64 prev = 0;			/* previous line's leading spaces */
 	s64 delta[129];			/* delta[k] = times indent jumped by k */
@@ -563,7 +563,7 @@ static void ex_detect_indent(struct buf *p)
 			prev = 0;		/* dedent to column 0 */
 	}
 	if (tab_lines > space_lines) {
-		p->et = xet = 0;
+		p->et = opt_expandtab = 0;
 	} else if (space_lines > 0) {
 		s64 best = 0, bestn = 0;
 		for (s64 d = 1; d <= 128; d++)
@@ -572,8 +572,8 @@ static void ex_detect_indent(struct buf *p)
 				best = d;
 			}
 		if (best) {
-			p->et = xet = 1;
-			p->sw = xsw = best;
+			p->et = opt_expandtab = 1;
+			p->sw = opt_shiftwidth = best;
 		}
 	}
 }
@@ -881,7 +881,7 @@ void ex_bufpostfix(struct buf *p, s64 clear)
 	p->mtime = mtime(p->path);
 	p->ft = syn_filetype(p->path);
 	lbuf_saved(p->lb, clear);
-	if (xidt)
+	if (opt_detect_indent_lines)
 		ex_detect_indent(p);
 }
 
@@ -2363,22 +2363,22 @@ static void *eo_##opt(char *loc, char *cmd, char *arg) { inner }
 #define EO(opt, var) \
 	_EO(opt, var = *arg ? eo_val(arg) : !var; return NULL;)
 
-EO(pac, opt_print_autocomplete) EO(pr, opt_print_reg) EO(ai, opt_autoindent) EO(aspec, xaspec) EO(err, opt_error_mode) EO(fr, opt_find_reg) EO(ish, opt_interactive_shell) EO(ic, opt_ignorecase) EO(mpt, opt_multiline_prompt)
-EO(rr, opt_record_reg) EO(shape, opt_shaping) EO(seq, opt_undo_seq) EO(order, opt_reorder) EO(hllw, xhllw) EO(hll, opt_hl_line) EO(hlw, opt_hl_word)
-EO(hlp, opt_hl_pair) EO(hl, opt_syntax_hl) EO(lim, opt_render_limit) EO(led, opt_line_editor) EO(vis, opt_startup_flags) EO(tc, xtc) EO(ar, xar) EO(gr, xgr)
-EO(et, xet) EO(idt, xidt)
+EO(pac, opt_print_autocomplete) EO(pr, opt_print_reg) EO(ai, opt_autoindent) EO(aspec, opt_agent_exspec) EO(err, opt_error_mode) EO(fr, opt_find_reg) EO(ish, opt_interactive_shell) EO(ic, opt_ignorecase) EO(mpt, opt_multiline_prompt)
+EO(rr, opt_record_reg) EO(shape, opt_shaping) EO(seq, opt_undo_seq) EO(order, opt_reorder) EO(hllw, opt_hl_wrap) EO(hll, opt_hl_line) EO(hlw, opt_hl_word)
+EO(hlp, opt_hl_pair) EO(hl, opt_syntax_hl) EO(lim, opt_render_limit) EO(led, opt_line_editor) EO(vis, opt_startup_flags) EO(tc, opt_path_complete) EO(ar, opt_agent_reasoning) EO(gr, opt_agent_guardrails)
+EO(et, opt_expandtab) EO(idt, opt_detect_indent_lines)
 
 _EO(ts, opt_tabstop = *arg ? eo_val(arg) : !opt_tabstop; opt_tabstop = MAX(0, opt_tabstop); RST_NULL(0, 1, 2) return NULL;)
-_EO(sw, if (*arg) xsw = eo_val(arg); return NULL;)
+_EO(sw, if (*arg) opt_shiftwidth = eo_val(arg); return NULL;)
 _EO(td, opt_text_dir = *arg ? eo_val(arg) : !opt_text_dir; RST_NULL(0, 1) return NULL;)
 _EO(grp, opt_search_group = (*arg ? eo_val(arg) : !opt_search_group) * 2; opt_search_group = MAX(0, opt_search_group); return NULL;)
 
 /* no argument turns the wrap on at INT64_MAX, which ren_wrapw caps by the
  * screen: the column then follows every resize on its own */
 _EO(lw,
-	xlw = !*arg ? (xlw ? 0 : INT64_MAX) : eo_val(arg);
+	opt_wrap_width = !*arg ? (opt_wrap_width ? 0 : INT64_MAX) : eo_val(arg);
 	opt_left_col = 0;
-	xtopsub = 0;
+	view_top_segment = 0;
 	RST_NULL(0, 1)
 	return NULL;
 )
@@ -2406,9 +2406,9 @@ _EO(left,
 _EO(aco,
 	s64 browse = strchr(cmd, '!') != NULL;
 	s64 value = *arg ? eo_val(arg) :
-		(xaco && xaco_browse == browse ? 0 : 85000);
-	xaco = MAX(0, value);
-	xaco_browse = browse;
+		(opt_autocompact_tokens && opt_autocompact_browse == browse ? 0 : 85000);
+	opt_autocompact_tokens = MAX(0, value);
+	opt_autocompact_browse = browse;
 	return NULL;
 )
 
@@ -2713,7 +2713,7 @@ void *ex_exec(const char *ln)
 		ln = ex_arg(ln, sb, &arg);
 		if (agent_interrupted())
 			break;
-		if (agent_tool && xaspec && excmds[idx].ec != ec_exspec &&
+		if (agent_tool && opt_agent_exspec && excmds[idx].ec != ec_exspec &&
 				excmds[idx].ec != ec_aretry)
 			if (exspec_agent(excmds[idx].name, *sb->s)) {
 				free(exspec_deferred);

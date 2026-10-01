@@ -370,7 +370,7 @@ s64 syn_addhl(char *reg, s64 id);
 void syn_init(void);
 
 /* uc.c: utf-8 helper functions */
-extern unsigned char _utf8_length[256];
+extern unsigned char utf8_length_default[256];
 extern unsigned char *utf8_length;
 extern s64 zwlen, def_zwlen;
 extern s64 bclen, def_bclen;
@@ -602,26 +602,26 @@ extern s64 opt_text_dir;
 extern s64 opt_shaping;
 extern s64 opt_reorder;
 extern s64 opt_tabstop;
-extern s64 xet;
-extern s64 xsw;
-extern s64 xidt;
+extern s64 opt_expandtab;
+extern s64 opt_shiftwidth;
+extern s64 opt_detect_indent_lines;
 extern s64 opt_interactive_shell;
 extern s64 opt_search_group;
-extern s64 xaspec;
+extern s64 opt_agent_exspec;
 extern s64 opt_print_autocomplete;
-extern s64 xtc;
+extern s64 opt_path_complete;
 extern s64 opt_multiline_prompt;
 extern s64 opt_print_reg;
 extern s64 opt_render_limit;
-extern s64 xlw;
-extern s64 xhllw;
+extern s64 opt_wrap_width;
+extern s64 opt_hl_wrap;
 extern s64 opt_undo_seq;
 extern s64 opt_error_mode;
 extern s64 opt_find_reg;
 extern s64 opt_record_reg;
 /* global variables */
 extern s64 quit_state;
-extern s64 cursor_row, cursor_off, view_top_row, xtopsub;
+extern s64 cursor_row, cursor_off, view_top_row, view_top_segment;
 extern s64 buf_count;
 extern s64 vi_ex_depth;
 extern s64 cur_keymap;
@@ -652,20 +652,20 @@ extern struct buf *prev_buf;
 	cursor_row = buf->row; \
 	cursor_off = buf->off; \
 	view_top_row = buf->top; \
-	xtopsub = buf->topsub; \
+	view_top_segment = buf->topsub; \
 	opt_text_dir = buf->td; \
-	xet = buf->et; \
-	xsw = buf->sw; \
+	opt_expandtab = buf->et; \
+	opt_shiftwidth = buf->sw; \
 	opt_tabstop = buf->ts; \
 
 #define exbuf_save(buf) \
 	buf->row = cursor_row; \
 	buf->off = cursor_off; \
 	buf->top = view_top_row; \
-	buf->topsub = xtopsub; \
+	buf->topsub = view_top_segment; \
 	buf->td = opt_text_dir; \
-	buf->et = xet; \
-	buf->sw = xsw; \
+	buf->et = opt_expandtab; \
+	buf->sw = opt_shiftwidth; \
 	buf->ts = opt_tabstop; \
 
 /* bufs_switchwft: switch to bufs[idx] and set its filetype */
@@ -748,8 +748,8 @@ struct spellft {
 };
 extern struct spellft spell_fts[];
 extern const s64 spell_ftslen;
-extern const s64 conf_hlmat;
-extern const s64 conf_hlmatc;
+extern const s64 conf_hl_match;
+extern const s64 conf_hl_match_cursor;
 char **conf_kmap(s64 id);
 s64 conf_kmapfind(char *name);
 char *conf_digraph(s64 c1, s64 c2);

@@ -374,7 +374,7 @@ static s64 agent_boundary(void)
 static void agent_capture_add(const char *s, s64 n)
 {
 	agent_capture_total += n;
-	if (xgr == 2)
+	if (opt_agent_guardrails == 2)
 		n = MIN(n, MAX(0, 4097 - agent_capture->s_n));
 	sbuf_mem(agent_capture, s, n)
 }
@@ -635,7 +635,7 @@ static sbuf *agent_shell(char *cmd, sbuf *input, s64 oproc, s64 *status)
 		opt_interactive_shell ? "-i" : "-c", opt_interactive_shell ? "-c" : cmd,
 		opt_interactive_shell ? cmd : NULL, NULL};
 	s64 st;
-	sbuf *out = agent_process(argv, input, &st, 0, !oproc && xgr == 2,
+	sbuf *out = agent_process(argv, input, &st, 0, !oproc && opt_agent_guardrails == 2,
 		NULL);
 	if (!out) {
 		agent_child_status = 1;
@@ -947,10 +947,10 @@ static void agent_run(const char *input)
 		/* Only complete tool batches reach this boundary. Manual/automatic
 		 * pack agents must never recursively trigger autocompaction. */
 		/* The threshold triggers a pack, not a hard cap on its result. */
-		if (compacted && agent_tokens() < xaco)
+		if (compacted && agent_tokens() < opt_autocompact_tokens)
 			compacted = 0;
-		if (xaco && !compacted && !agent_packing && agent_logbuf == 3 &&
-				agent_tokens() >= xaco) {
+		if (opt_autocompact_tokens && !compacted && !agent_packing && agent_logbuf == 3 &&
+				agent_tokens() >= opt_autocompact_tokens) {
 			if (!agent_autocompact(input) || epoch != agent_epoch || quit_state)
 				return;
 			/* The pack conversation was discarded. Start a fresh tool-round
@@ -1051,7 +1051,7 @@ static void agent_run(const char *input)
 		/* Complete pairs before recursive editing or submissions. */
 		cJSON_AddItemToArray(agent_messages,
 			cJSON_Duplicate(message, 1));
-		if (xar) {
+		if (opt_agent_reasoning) {
 			cJSON *reasoning = cJSON_GetObjectItem(message,
 				"reasoning_content");
 			if (!cJSON_IsString(reasoning) || !*reasoning->valuestring)
@@ -1105,15 +1105,15 @@ static void agent_run(const char *input)
 				err = ex_exec(command->valuestring);
 				agent_tool_calls++;
 				agent_sequence();
-				if (xgr == 2 && agent_capture_total > 4096) {
+				if (opt_agent_guardrails == 2 && agent_capture_total > 4096) {
 					char msg[128];
 					snprintf(msg, sizeof(msg),
 						"output guardrail: %zu > 4096 (gr 0 to bypass once)",
 						agent_capture_total);
 					sbuf_cut(out, 0)
 					sbufn_str(out, msg)
-				} else if (xgr >= 0 && xgr < 2)
-					xgr++;
+				} else if (opt_agent_guardrails >= 0 && opt_agent_guardrails < 2)
+					opt_agent_guardrails++;
 				agent_capture = NULL;
 				agent_tool = 0;
 				if (agent_input_blocked) {
@@ -1223,7 +1223,7 @@ static void *ec_ast(char *loc, char *cmd, char *arg)
 	cJSON *m;
 	ex_print("agent status", msg_ft)
 	snprintf(msg, sizeof(msg), "autocompact %s, %ld input tokens (%s)",
-		xaco ? "on" : "off", xaco, xaco_browse ? "aco! browse" : "aco loaded log");
+		opt_autocompact_tokens ? "on" : "off", opt_autocompact_tokens, opt_autocompact_browse ? "aco! browse" : "aco loaded log");
 	ex_print(msg, msg_ft)
 	if (!agent_ready) {
 		ex_print(agent_init_error ? agent_init_error :
@@ -1295,7 +1295,7 @@ static void *ec_ast(char *loc, char *cmd, char *arg)
 		agent_capture ? (long)agent_capture->s_n : 0);
 	ex_print(msg, msg_ft)
 	snprintf(msg, sizeof(msg), "limits     %ld rounds max, %ld sec timeout, guardrail %ld",
-		max_tool_rounds, request_timeout, xgr);
+		max_tool_rounds, request_timeout, opt_agent_guardrails);
 	ex_print(msg, msg_ft)
 	snprintf(msg, sizeof(msg), "session    %s", tempbufs[3].path);
 	ex_print(msg, msg_ft)
@@ -1542,7 +1542,7 @@ static s64 agent_autocompact(const char *input)
 	struct agent_usage usage = agent_usage;
 	unsigned long epoch = agent_epoch, serial = agent_serial;
 	unsigned long rounds = agent_rounds;
-	s64 logbuf = agent_logbuf, browse = xaco_browse;
+	s64 logbuf = agent_logbuf, browse = opt_autocompact_browse;
 	/* Store indices rather than pointers: a tool can grow the buffer array. */
 	s64 savedtemp = istempbuf(cur_buf);
 	s64 savedbuf = savedtemp ? cur_buf - tempbufs : cur_buf - bufs;

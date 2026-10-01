@@ -10,7 +10,7 @@
  * ends the loops). `:uc` toggles between this and byte mode (all non-NUL
  * entries 1; tested as utf8_length[0xc0] == 1). Read through the
  * utf8_length pointer below, never directly. */
-unsigned char _utf8_length[256] = {
+unsigned char utf8_length_default[256] = {
 	/*	0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F */
 	/* 0 */ 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 	/* 1 */ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -29,10 +29,10 @@ unsigned char _utf8_length[256] = {
 	/* E */ 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	/* F */ 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1
 };
-/** The active sequence-length table, normally _utf8_length. re_pikevm() and
+/** The active sequence-length table, normally utf8_length_default. re_pikevm() and
  * lbuf_search() set its '\n' entry to 0 while matching, and lbuf_search()
  * points it at an all-zero table for a moment to stop its search threads. */
-unsigned char *utf8_length = _utf8_length;
+unsigned char *utf8_length = utf8_length_default;
 
 /** @brief The number of utf-8 characters in a fat nulled s. */
 s64 uc_slen(char *s)
